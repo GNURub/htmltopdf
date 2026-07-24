@@ -2825,6 +2825,31 @@ impl<'a> LayoutContext<'a> {
                 } else {
                     0.0
                 };
+            let printable_height = (self.options.page.height_pt
+                - self.options.page.margin_top_pt
+                - self.options.page.margin_bottom_pt)
+                .max(0.0);
+            let has_multiple_lines = prepared.iter().any(|cell| cell.lines.len() > 1);
+            if row_height > printable_height
+                || (has_multiple_lines
+                    && row_height > self.current_y - self.options.page.margin_bottom_pt + 0.1)
+            {
+                self.layout_fragmented_table_row(
+                    table_x,
+                    &column_widths,
+                    &prepared,
+                    row_index,
+                    style,
+                    header_row
+                        .as_ref()
+                        .map(|(prepared, height)| (prepared.as_slice(), *height)),
+                    spacing_y,
+                );
+                if row_index + 1 < rows.len() {
+                    self.current_y -= spacing_y;
+                }
+                continue;
+            }
             let repeats_header = row_index > 0 && header_row.is_some();
             let needed_height = row_advance
                 + if repeats_header {
@@ -2866,6 +2891,135 @@ impl<'a> LayoutContext<'a> {
 
         if style.margin_bottom > 0.0 {
             self.current_y -= style.margin_bottom;
+        }
+    }
+
+    fn layout_fragmented_table_row(
+        &mut self,
+        table_x: f32,
+        column_widths: &[f32],
+        prepared: &[PreparedCell],
+        row_index: usize,
+        table_style: &ComputedStyle,
+        header_row: Option<(&[PreparedCell], f32)>,
+        spacing_y: f32,
+    ) {
+        let max_lines = prepared
+            .iter()
+            .map(|cell| cell.lines.len())
+            .max()
+            .unwrap_or(0);
+        if max_lines == 0 {
+            let height = table_row_height(prepared, table_style.border_collapse);
+            self.ensure_space(height);
+            self.paint_table_row(
+                table_x,
+                column_widths,
+                prepared,
+                height,
+                row_index,
+                table_style,
+                true,
+            );
+            self.current_y -= height;
+            return;
+        }
+
+        let repeats_header = row_index > 0 && header_row.is_some();
+        let initial_page = self.pages.len();
+        let mut header_page = None;
+        let mut start = 0;
+        let mut first_fragment = true;
+
+        while start < max_lines {
+            let first_height = table_row_fragment_height(
+                prepared,
+                start,
+                (start + 1).min(max_lines),
+                first_fragment,
+                start + 1 == max_lines,
+                table_style.border_collapse,
+            );
+            let mut header_just_painted = false;
+            if repeats_header
+                && self.pages.len() > initial_page
+                && header_page != Some(self.pages.len())
+            {
+                let (_, header_height) = header_row.expect("repeated table header");
+                let required = header_height + spacing_y + first_height;
+                if self.current_y < self.options.page.margin_bottom_pt + required
+                    && self.pages.last().is_some_and(|page| !page.items.is_empty())
+                {
+                    self.ensure_space(required);
+                    continue;
+                }
+                let (header_prepared, header_height) = header_row.expect("repeated table header");
+                self.paint_table_row(
+                    table_x,
+                    column_widths,
+                    header_prepared,
+                    header_height,
+                    0,
+                    table_style,
+                    false,
+                );
+                self.current_y -= header_height + spacing_y;
+                header_page = Some(self.pages.len());
+                header_just_painted = true;
+            }
+
+            let available = (self.current_y - self.options.page.margin_bottom_pt).max(0.0);
+            let mut end = start;
+            for candidate in (start + 1)..=max_lines {
+                let candidate_height = table_row_fragment_height(
+                    prepared,
+                    start,
+                    candidate,
+                    first_fragment,
+                    candidate == max_lines,
+                    table_style.border_collapse,
+                );
+                if candidate_height <= available + 0.1 {
+                    end = candidate;
+                } else {
+                    break;
+                }
+            }
+            if end == start {
+                if !header_just_painted
+                    && self.pages.last().is_some_and(|page| !page.items.is_empty())
+                {
+                    self.ensure_space(first_height);
+                    continue;
+                }
+                end = (start + 1).min(max_lines);
+            }
+
+            let last_fragment = end == max_lines;
+            let fragment_height = table_row_fragment_height(
+                prepared,
+                start,
+                end,
+                first_fragment,
+                last_fragment,
+                table_style.border_collapse,
+            );
+            self.paint_table_row_fragment(
+                table_x,
+                column_widths,
+                prepared,
+                fragment_height,
+                row_index,
+                table_style,
+                true,
+                start,
+                end,
+                first_fragment,
+                last_fragment,
+            );
+            self.current_y -= fragment_height;
+            start = end;
+            first_fragment = false;
         }
     }
 
@@ -2994,23 +3148,56 @@ impl<'a> LayoutContext<'a> {
         table_style: &ComputedStyle,
         allow_rounded_header: bool,
     ) {
+        self.paint_table_row_fragment(
+            table_x,
+            column_widths,
+            prepared,
+            row_height,
+            row_index,
+            table_style,
+            allow_rounded_header,
+            0,
+            usize::MAX,
+            true,
+            true,
+        );
+    }
+
+    fn paint_table_row_fragment(
+        &mut self,
+        table_x: f32,
+        column_widths: &[f32],
+        prepared: &[PreparedCell],
+        row_height: f32,
+        row_index: usize,
+        table_style: &ComputedStyle,
+        allow_rounded_header: bool,
+        line_start: usize,
+        line_end: usize,
+        first_fragment: bool,
+        last_fragment: bool,
+    ) {
         let row_top = self.current_y;
         let row_bottom = row_top - row_height;
         let mut x = table_x;
         let spacing_x = table_horizontal_spacing(table_style, column_widths.len());
         let table_width = column_widths.iter().sum::<f32>()
             + spacing_x * column_widths.len().saturating_sub(1) as f32;
-        let unified_header_background =
-            if allow_rounded_header && row_index == 0 && table_style.border_radius > 0.0 {
-                prepared.first().map(|cell| {
-                    cell.style
-                        .background
-                        .unwrap_or(rgb(0xf1f5f9))
-                        .with_opacity(cell.style.opacity)
-                })
-            } else {
-                None
-            };
+        let unified_header_background = if allow_rounded_header
+            && first_fragment
+            && last_fragment
+            && row_index == 0
+            && table_style.border_radius > 0.0
+        {
+            prepared.first().map(|cell| {
+                cell.style
+                    .background
+                    .unwrap_or(rgb(0xf1f5f9))
+                    .with_opacity(cell.style.opacity)
+            })
+        } else {
+            None
+        };
         if let Some(background) = unified_header_background {
             self.push(LayoutItem::RoundRect(RoundRect {
                 x: table_x,
@@ -3047,22 +3234,41 @@ impl<'a> LayoutContext<'a> {
             }
             self.push_table_cell_border(x, row_bottom, cell_width, row_height, cell_style);
 
-            let free_space = (row_height
-                - cell_style.padding_top
-                - cell_style.padding_bottom
-                - cell.content_height)
-                .max(0.0);
-            let vertical_offset = match cell_style.vertical_align {
-                VerticalAlign::Middle => free_space / 2.0,
-                VerticalAlign::Bottom => free_space,
-                VerticalAlign::Baseline | VerticalAlign::Top => 0.0,
+            let start = line_start.min(cell.lines.len());
+            let end = line_end.min(cell.lines.len()).max(start);
+            let content_height = cell.lines[start..end]
+                .iter()
+                .map(|line| line.before + line.style.line_height + line.after)
+                .sum::<f32>();
+            let includes_top_padding = first_fragment && start == 0;
+            let includes_bottom_padding =
+                last_fragment || (start < cell.lines.len() && end >= cell.lines.len());
+            let top_padding = if includes_top_padding {
+                cell_style.padding_top
+            } else {
+                0.0
             };
-            let mut text_y =
-                row_top - cell_style.padding_top - vertical_offset - cell_style.font_size;
+            let bottom_padding = if includes_bottom_padding {
+                cell_style.padding_bottom
+            } else {
+                0.0
+            };
+            let free_space = (row_height - top_padding - bottom_padding - content_height).max(0.0);
+            let vertical_offset = if first_fragment && last_fragment {
+                match cell_style.vertical_align {
+                    VerticalAlign::Middle => free_space / 2.0,
+                    VerticalAlign::Bottom => free_space,
+                    VerticalAlign::Baseline | VerticalAlign::Top => 0.0,
+                }
+            } else {
+                0.0
+            };
+            let mut text_y = row_top - top_padding - vertical_offset - cell_style.font_size;
             let content_width =
                 (cell_width - cell_style.padding_left - cell_style.padding_right).max(8.0);
             let line_count = cell.lines.len();
-            for (line_index, line) in cell.lines.iter().enumerate() {
+            for (line_index, line) in cell.lines[start..end].iter().enumerate() {
+                let line_index = start + line_index;
                 let line_style = &line.style;
                 text_y -= line.before;
                 let text_width = estimate_text_width_with_spacing(
@@ -7417,6 +7623,55 @@ fn table_row_height(prepared: &[PreparedCell], border_collapse: BorderCollapse) 
     }
 }
 
+fn table_row_fragment_height(
+    prepared: &[PreparedCell],
+    line_start: usize,
+    line_end: usize,
+    first_fragment: bool,
+    last_fragment: bool,
+    border_collapse: BorderCollapse,
+) -> f32 {
+    let height = prepared
+        .iter()
+        .map(|cell| {
+            let start = line_start.min(cell.lines.len());
+            let end = line_end.min(cell.lines.len()).max(start);
+            let content_height = cell.lines[start..end]
+                .iter()
+                .map(|line| line.before + line.style.line_height + line.after)
+                .sum::<f32>();
+            let includes_top_padding = first_fragment && start == 0;
+            let includes_bottom_padding =
+                last_fragment || (start < cell.lines.len() && end >= cell.lines.len());
+            let top_padding = if includes_top_padding {
+                cell.style.padding_top
+            } else {
+                0.0
+            };
+            let bottom_padding = if includes_bottom_padding {
+                cell.style.padding_bottom
+            } else {
+                0.0
+            };
+            let nested_adjustment = if start < cell.lines.len() && end >= cell.lines.len() {
+                (cell.height
+                    - cell.style.padding_top
+                    - cell.style.padding_bottom
+                    - cell.content_height)
+                    .max(0.0)
+            } else {
+                0.0
+            };
+            top_padding + bottom_padding + content_height + nested_adjustment
+        })
+        .fold(0.0_f32, f32::max);
+    if border_collapse == BorderCollapse::Collapse {
+        (height - collapsed_border_overlap(prepared)).max(1.0)
+    } else {
+        height.max(1.0)
+    }
+}
+
 fn table_horizontal_spacing(style: &ComputedStyle, column_count: usize) -> f32 {
     if column_count > 1 && style.border_collapse == BorderCollapse::Separate {
         style.border_spacing_horizontal.max(0.0)
@@ -10587,6 +10842,83 @@ mod tests {
             assert_eq!(
                 first.0, second.0,
                 "grid row split across pages: {item_pages:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tall_table_rows_fragment_across_pages_and_repeat_headers() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                table { width: 200pt; border-collapse: collapse; }
+                th, td { border: 1pt solid #64748b; padding: 2pt; vertical-align: top; }
+            </style>
+            <table>
+                <thead><tr><th>Header key</th><th>Header value</th></tr></thead>
+                <tbody><tr>
+                    <td>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu</td>
+                    <td>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour</td>
+                </tr></tbody>
+            </table>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(
+            pages.len() >= 2,
+            "tall table row should continue across pages: {}",
+            pages.len()
+        );
+        let text_runs = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => {
+                        Some((page_index, text))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        let rendered = text_runs
+            .iter()
+            .map(|(_, text)| text.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(rendered.contains("zulu"), "last left-column line was lost");
+        assert!(
+            rendered.contains("twentyfour"),
+            "last right-column line was lost"
+        );
+        let header_pages = text_runs
+            .iter()
+            .filter(|(page, text)| {
+                *page > 0
+                    && (text.text.contains("Header key") || text.text.contains("Header value"))
+            })
+            .map(|(page, _)| *page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            header_pages.len() >= 1,
+            "header should repeat on continuation pages: {header_pages:?}"
+        );
+        for (page_index, text) in text_runs {
+            assert!(
+                text.y >= options.page.margin_bottom_pt,
+                "text escaped below page {page_index}: {text:?}"
             );
         }
     }

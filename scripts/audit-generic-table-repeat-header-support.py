@@ -5,11 +5,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 LAYOUT = ROOT / "crates/htmlpdf-core/src/layout.rs"
 FIXTURE = ROOT / "examples/generic-table-repeat-header.html"
+TALL_FIXTURE = ROOT / "examples/generic-tall-table.html"
 checks = {
     LAYOUT: [
         "struct PreparedCell",
         "fn prepare_table_row",
         "fn paint_table_row",
+        "fn layout_fragmented_table_row",
+        "fn paint_table_row_fragment",
+        "fn table_row_fragment_height",
         "fn is_header_row",
         "fn prepared_row_height",
         "repeats_header",
@@ -17,6 +21,11 @@ checks = {
     FIXTURE: [
         "<thead><tr><th>Fecha</th>",
         "24/3/26</td><td>23:00",
+    ],
+    TALL_FIXTURE: [
+        "<thead>",
+        "td:first-child { background: #fef3c7; }",
+        "uniform victor whiskey",
     ],
 }
 errors = []
