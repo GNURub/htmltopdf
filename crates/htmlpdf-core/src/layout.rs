@@ -1422,30 +1422,24 @@ impl<'a> LayoutContext<'a> {
         } else {
             vec![0..children.len()]
         };
-        let estimated_row_height = style.padding_top
-            + style.padding_bottom
-            + line_ranges
-                .iter()
-                .enumerate()
-                .map(|(line_idx, range)| {
-                    let line_height = range
-                        .clone()
-                        .map(|idx| {
-                            self.estimated_inline_block_height(
-                                children[idx],
-                                base_child_widths.get(idx).copied().unwrap_or(0.0),
-                            )
-                        })
-                        .fold(0.0_f32, f32::max);
-                    line_height
-                        + if line_idx + 1 < line_ranges.len() {
-                            style.row_gap
-                        } else {
-                            0.0
-                        }
-                })
-                .sum::<f32>();
-        self.ensure_space(estimated_row_height);
+        let line_estimates = line_ranges
+            .iter()
+            .map(|range| {
+                range
+                    .clone()
+                    .map(|idx| {
+                        self.estimated_inline_block_height(
+                            children[idx],
+                            base_child_widths.get(idx).copied().unwrap_or(0.0),
+                        )
+                    })
+                    .fold(0.0_f32, f32::max)
+            })
+            .collect::<Vec<_>>();
+        let first_line_needed = style.padding_top
+            + line_estimates.first().copied().unwrap_or(0.0)
+            + style.padding_bottom;
+        self.ensure_space(first_line_needed.max(first_fragment_min_height(style)));
 
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
@@ -1460,6 +1454,17 @@ impl<'a> LayoutContext<'a> {
             let line_len = range.end.saturating_sub(range.start);
             if line_len == 0 {
                 continue;
+            }
+            if line_idx > 0 {
+                self.current_y = line_top;
+                let page_count_before = self.pages.len();
+                let line_needed = line_estimates.get(line_idx).copied().unwrap_or(0.0)
+                    + style.row_gap
+                    + style.padding_bottom;
+                self.ensure_space(line_needed.max(first_fragment_min_height(style)));
+                if self.pages.len() != page_count_before {
+                    line_top = self.current_y;
+                }
             }
             let mut line_widths = if style.flex_wrap == FlexWrap::Wrap {
                 base_child_widths[range.clone()].to_vec()
@@ -2033,6 +2038,7 @@ impl<'a> LayoutContext<'a> {
             return;
         }
 
+        self.ensure_space(first_fragment_min_height(style));
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
         let top_y = self.current_y;
@@ -2090,6 +2096,9 @@ impl<'a> LayoutContext<'a> {
                 let min_row_height = grid_row_track_min_height(style, row_index, row_track_base);
                 let Some(placed) = row.first() else {
                     if min_row_height > 0.0 {
+                        self.ensure_space(
+                            (min_row_height + row_gap).max(first_fragment_min_height(style)),
+                        );
                         self.current_y -= min_row_height + row_gap;
                     }
                     continue;
@@ -2109,6 +2118,9 @@ impl<'a> LayoutContext<'a> {
                     - self.options.page.margin_right_pt
                     - self.inset_left
                     - child_width;
+                let row_estimate =
+                    min_row_height.max(self.estimated_inline_block_height(placed.id, child_width));
+                self.ensure_space((row_estimate + row_gap).max(first_fragment_min_height(style)));
                 let before_child_y = self.current_y;
                 let child_page_index = self.pages.len().saturating_sub(1);
                 let item_start = self.pages[child_page_index].items.len();
@@ -2159,8 +2171,27 @@ impl<'a> LayoutContext<'a> {
 
         let mut row_ranges = Vec::new();
         for (row_index, row) in rows.into_iter().enumerate() {
-            let row_content_top = self.current_y;
             let min_row_height = grid_row_track_min_height(style, row_index, row_track_base);
+            let mut row_estimate = min_row_height;
+            for placed in &row {
+                let child_style = self.computed_style(placed.id);
+                let area_width = grid_spanned_track_width(
+                    &track_widths,
+                    placed.start_column,
+                    placed.span,
+                    effective_column_gap,
+                );
+                let (_, child_width) = self.grid_item_inline_geometry(
+                    placed.id,
+                    &child_style,
+                    area_width,
+                    style.justify_items,
+                );
+                row_estimate =
+                    row_estimate.max(self.estimated_inline_block_height(placed.id, child_width));
+            }
+            self.ensure_space((row_estimate + row_gap).max(first_fragment_min_height(style)));
+            let row_content_top = self.current_y;
             let mut max_consumed = 0.0_f32;
             let mut max_baseline_offset = 0.0_f32;
             let mut child_layouts = Vec::with_capacity(row.len());
@@ -10442,6 +10473,122 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(rendered.iter().any(|text| text.contains("tango")));
+    }
+
+    #[test]
+    fn wrapped_flex_container_can_start_before_all_rows_fit() {
+        let html = r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { width: 80pt; margin: 0; }
+                .flex { display: flex; flex-wrap: wrap; width: 160pt; gap: 4pt; padding: 4pt; }
+                .item { flex: 0 0 76pt; height: 20pt; background: #bfdbfe; }
+            </style>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen</p>
+            <div class="flex">
+                <div class="item">A</div><div class="item">B</div>
+                <div class="item">C</div><div class="item">D</div>
+                <div class="item">E</div><div class="item">F</div>
+            </div>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 200.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let item_pages = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text)
+                        if matches!(text.text.as_str(), "A" | "B" | "C" | "D" | "E" | "F") =>
+                    {
+                        Some((page_index, text.text.as_str()))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_pages.len(),
+            6,
+            "all flex items should render: {item_pages:?}"
+        );
+        assert!(
+            item_pages.iter().any(|(page, _)| *page == 0),
+            "the first flex row should use remaining space before the continuation page: {item_pages:?}"
+        );
+    }
+
+    #[test]
+    fn grid_rows_stay_together_when_the_grid_crosses_a_page() {
+        let html = r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { width: 80pt; margin: 0; }
+                .grid { display: grid; grid-template-columns: repeat(2, 76pt); gap: 4pt; width: 160pt; }
+                .item { height: 20pt; background: #bfdbfe; }
+            </style>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen</p>
+            <div class="grid">
+                <div class="item">A</div><div class="item">B</div>
+                <div class="item">C</div><div class="item">D</div>
+                <div class="item">E</div><div class="item">F</div>
+            </div>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 200.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let item_pages = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text)
+                        if matches!(text.text.as_str(), "A" | "B" | "C" | "D" | "E" | "F") =>
+                    {
+                        Some((page_index, text.text.as_str()))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_pages.len(),
+            6,
+            "all grid items should render: {item_pages:?}"
+        );
+        for pair in [(&"A", &"B"), (&"C", &"D"), (&"E", &"F")] {
+            let first = item_pages
+                .iter()
+                .find(|(_, text)| text == pair.0)
+                .expect("first item in grid row");
+            let second = item_pages
+                .iter()
+                .find(|(_, text)| text == pair.1)
+                .expect("second item in grid row");
+            assert_eq!(
+                first.0, second.0,
+                "grid row split across pages: {item_pages:?}"
+            );
+        }
     }
 
     #[test]
