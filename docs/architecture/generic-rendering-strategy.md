@@ -104,7 +104,7 @@ CSS:
 - First-pass `overflow: hidden|clip` clipping for rectangular and rounded containers
 - Browser-like non-painted content handling for `hidden`, `aria-hidden="true"`, `visibility: hidden`, `template`, and unsupported embedded media containers such as `iframe`
 - Box model: margins, padding, `width`, `min-width`, `max-width`, `height`, `min-height`, plus first-pass logical aliases such as `inline-size`, `min-block-size`, `padding-inline`, `margin-block`, and `border-inline-start`
-- Classic document flow: `float: left|right` with text wrapping and `clear: left|right|both` across normal-flow siblings
+- Classic document flow: `float: left|right` with text wrapping, styled inline segments, and `clear: left|right|both` across normal-flow siblings
 - First-pass positioned layout for `position: relative|absolute|fixed|sticky` with `top`, `right`, `bottom`, `left`, and logical `inset-*` aliases; absolute/fixed boxes are painted out of normal flow
 - Modern length functions for layout-critical properties: `calc(...)`, `min(...)`, `max(...)`, `clamp(...)`, percentages, `px`, `pt`, `mm`, `cm`, `in`, `rem`, `em`
 - Inherited text styling: `font-size`, `line-height`, `font-family` mapped to built-in sans/serif/monospace PDF fonts, `font-weight`, `letter-spacing`, `text-transform`, `<br>` hard line breaks, `white-space`, `overflow-wrap`, `color`, `text-align`; local TrueType CID embedding is selected automatically for characters outside WinAnsi and can still be forced globally with `HTMLPDF_EMBED_FONTS=1`

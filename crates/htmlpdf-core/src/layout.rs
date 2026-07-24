@@ -241,6 +241,13 @@ struct FlowTextLine {
 }
 
 #[derive(Clone)]
+struct FlowInlineLine {
+    segments: Vec<InlineTextSegment>,
+    inset_left: f32,
+    available_width: f32,
+}
+
+#[derive(Clone)]
 struct PreparedCell {
     style: ComputedStyle,
     lines: Vec<PreparedLine>,
@@ -654,6 +661,65 @@ impl<'a> LayoutContext<'a> {
                 break;
             }
             remaining = wrapped[lines_until_float..].join(" ");
+        }
+
+        output
+    }
+
+    fn wrap_inline_segments_with_floats(
+        &self,
+        segments: &[InlineTextSegment],
+        style: &ComputedStyle,
+        base_left: f32,
+        base_right: f32,
+    ) -> Vec<FlowInlineLine> {
+        let tokens = tokenize_inline_segments(segments);
+        let mut cursor = 0usize;
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut y = self.current_y;
+        let line_height = layout_line_height(style).max(0.01);
+        let mut output = Vec::new();
+
+        while cursor < tokens.len() {
+            if y < self.options.page.margin_bottom_pt + line_height {
+                page_index += 1;
+                y = self.options.page.height_pt - self.options.page.margin_top_pt;
+            }
+
+            let occupied_left = self.float_occupied_width_at_y(page_index, y, FloatSide::Left);
+            let occupied_right = self.float_occupied_width_at_y(page_index, y, FloatSide::Right);
+            let inset_left = base_left + occupied_left;
+            let inset_right = base_right + occupied_right;
+            let raw_available_width = (self.options.page.width_pt
+                - self.options.page.margin_left_pt
+                - self.options.page.margin_right_pt
+                - inset_left
+                - inset_right)
+                .max(0.0);
+            let available_width = if style.width.is_some()
+                || style.min_width.is_some()
+                || style.max_width.is_some()
+            {
+                resolve_box_width(style, raw_available_width)
+            } else {
+                raw_available_width
+            };
+            let (line, next_cursor) = wrap_one_inline_line(
+                &tokens,
+                cursor,
+                available_width,
+                style.white_space == WhiteSpace::NoWrap,
+            );
+            if next_cursor <= cursor {
+                break;
+            }
+            output.push(FlowInlineLine {
+                segments: line,
+                inset_left,
+                available_width,
+            });
+            cursor = next_cursor;
+            y -= line_height;
         }
 
         output
@@ -3733,21 +3799,9 @@ impl<'a> LayoutContext<'a> {
         if style.margin_top > 0.0 {
             self.current_y -= style.margin_top;
         }
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
-        let top_y = self.current_y;
-
-        let raw_available_width = self.options.page.width_pt
-            - self.options.page.margin_left_pt
-            - self.options.page.margin_right_pt
-            - self.inset_left
-            - self.inset_right;
-        let available_width =
-            if style.width.is_some() || style.min_width.is_some() || style.max_width.is_some() {
-                resolve_box_width(style, raw_available_width)
-            } else {
-                raw_available_width
-            };
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut insert_index = self.pages[page_index].items.len();
+        let mut top_y = self.current_y;
 
         let mut segments = Vec::new();
         self.collect_inline_text_segments(id, style, &mut segments);
@@ -3755,48 +3809,84 @@ impl<'a> LayoutContext<'a> {
             return;
         }
 
-        let lines = wrap_inline_segments(&segments, available_width);
+        let base_left = self.inset_left
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Left);
+        let base_right = self.inset_right
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Right);
+        let mut lines = self.wrap_inline_segments_with_floats(
+            &segments,
+            style,
+            base_left.max(0.0),
+            base_right.max(0.0),
+        );
+        let mut available_width = lines
+            .iter()
+            .map(|line| line.available_width)
+            .fold(0.0_f32, f32::max);
         let layout_line_height = layout_line_height(style);
-        let text_height = layout_line_height * lines.len() as f32;
         let height_base = self.options.page.height_pt
             - self.options.page.margin_top_pt
             - self.options.page.margin_bottom_pt;
-        let resolved_flow_height =
+        let mut text_height = layout_line_height * lines.len() as f32;
+        let mut resolved_flow_height =
             resolve_box_height(style, available_width, text_height, height_base);
-        let visible_overflow_capped =
+        let mut visible_overflow_capped =
             !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-        let flow_height = resolved_flow_height + style.margin_bottom;
+        let mut flow_height = resolved_flow_height + style.margin_bottom;
+        let page_count_before = self.pages.len();
         self.ensure_space(flow_height.max(layout_line_height));
+        if self.pages.len() != page_count_before {
+            page_index = self.pages.len().saturating_sub(1);
+            insert_index = self.pages[page_index].items.len();
+            top_y = self.current_y;
+            lines = self.wrap_inline_segments_with_floats(
+                &segments,
+                style,
+                base_left.max(0.0),
+                base_right.max(0.0),
+            );
+            available_width = lines
+                .iter()
+                .map(|line| line.available_width)
+                .fold(0.0_f32, f32::max);
+            text_height = layout_line_height * lines.len() as f32;
+            resolved_flow_height =
+                resolve_box_height(style, available_width, text_height, height_base);
+            visible_overflow_capped =
+                !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
+            flow_height = resolved_flow_height + style.margin_bottom;
+            self.ensure_space(flow_height.max(layout_line_height));
+        }
 
         let line_count = lines.len();
         for (line_index, line) in lines.into_iter().enumerate() {
-            let line_width = inline_segments_width(&line);
+            let line_width = inline_segments_width(&line.segments);
             let resolved_align = resolved_line_text_align(style, line_index, line_count);
             let extra_word_spacing = justified_inline_word_spacing(
                 resolved_align,
-                &line,
+                &line.segments,
                 line_width,
-                available_width,
+                line.available_width,
                 suppress_justify_spacing_for_line(style, line_index, line_count),
             );
             let mut x = match resolved_align {
-                TextAlign::Left => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Left => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Center => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - line_width).max(0.0) / 2.0
+                        + line.inset_left
+                        + (line.available_width - line_width).max(0.0) / 2.0
                 }
                 TextAlign::Right => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - line_width).max(0.0)
+                        + line.inset_left
+                        + (line.available_width - line_width).max(0.0)
                 }
-                TextAlign::Justify => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Justify => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Start | TextAlign::End => {
                     unreachable!("resolved_line_text_align must resolve logical alignments")
                 }
             };
-            for segment in line {
+            for segment in line.segments {
                 let segment_width = estimate_text_width_with_spacing(
                     &segment.text,
                     segment.style.font_size,
@@ -3836,7 +3926,7 @@ impl<'a> LayoutContext<'a> {
         self.apply_style_transform_to_range(
             page_index,
             insert_index,
-            self.options.page.margin_left_pt + self.inset_left,
+            self.options.page.margin_left_pt + base_left.max(0.0),
             self.current_y,
             available_width,
             height,
@@ -7354,10 +7444,15 @@ fn ordered_list_item_index(document: &Document, id: NodeId) -> usize {
 fn is_text_aggregation_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "a" | "button"
+        "a" | "abbr"
+            | "b"
+            | "button"
             | "caption"
+            | "cite"
+            | "code"
             | "dd"
             | "dt"
+            | "em"
             | "figcaption"
             | "h1"
             | "h2"
@@ -7365,15 +7460,20 @@ fn is_text_aggregation_tag(tag: &str) -> bool {
             | "h4"
             | "h5"
             | "h6"
+            | "i"
             | "label"
             | "legend"
             | "li"
+            | "mark"
             | "p"
             | "small"
             | "span"
             | "strong"
+            | "sub"
+            | "sup"
             | "td"
             | "th"
+            | "u"
     )
 }
 
@@ -7382,68 +7482,133 @@ fn has_styled_inline_children(document: &Document, id: NodeId) -> bool {
         matches!(
             document.node(*child),
             Some(Node::Element(element))
-                if matches!(element.tag.as_str(), "strong" | "b" | "em" | "span")
+                if is_text_aggregation_tag(&element.tag)
                     && !document.text_content(*child).trim().is_empty()
         )
     })
 }
 
-fn wrap_inline_segments(
-    segments: &[InlineTextSegment],
-    available_width: f32,
-) -> Vec<Vec<InlineTextSegment>> {
-    let mut lines = Vec::new();
-    let mut current = Vec::new();
-    let mut current_width = 0.0_f32;
+fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSegment> {
+    let mut tokens = Vec::new();
+    let mut pending_space = false;
 
     for segment in segments {
         if segment.text == "\n" {
-            if !current.is_empty() {
-                lines.push(current);
-                current = Vec::new();
-                current_width = 0.0;
-            }
+            tokens.push(segment.clone());
+            pending_space = false;
             continue;
         }
 
-        for word in segment.text.split_whitespace() {
-            let word_segment = InlineTextSegment {
-                text: word.to_string(),
-                style: segment.style.clone(),
-            };
-            let word_width =
-                inline_segments_wrap_width(std::slice::from_ref(&word_segment), available_width);
-            let space_segment = InlineTextSegment {
-                text: " ".to_string(),
-                style: segment.style.clone(),
-            };
-            let space_width =
-                inline_segments_wrap_width(std::slice::from_ref(&space_segment), available_width);
-            let needed = if current.is_empty() {
-                word_width
+        let mut word = String::new();
+        for character in segment.text.chars() {
+            if character == '\n' && segment.style.white_space == WhiteSpace::PreLine {
+                push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
+                tokens.push(InlineTextSegment {
+                    text: "\n".to_string(),
+                    style: segment.style.clone(),
+                });
+                pending_space = false;
+            } else if character.is_whitespace() {
+                push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
+                pending_space = true;
             } else {
-                space_width + word_width
-            };
-
-            if !current.is_empty() && current_width + needed > available_width {
-                lines.push(current);
-                current = Vec::new();
-                current_width = 0.0;
+                if pending_space && !tokens.is_empty() {
+                    if !tokens
+                        .last()
+                        .is_some_and(|token: &InlineTextSegment| token.text == "\n")
+                    {
+                        tokens.push(InlineTextSegment {
+                            text: " ".to_string(),
+                            style: segment.style.clone(),
+                        });
+                    }
+                    pending_space = false;
+                }
+                word.push(character);
             }
-
-            if !current.is_empty() {
-                current.push(space_segment);
-                current_width += space_width;
-            }
-            current.push(word_segment);
-            current_width += word_width;
         }
+        push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
     }
 
-    if !current.is_empty() {
-        lines.push(current);
+    tokens
+}
+
+fn push_inline_word(
+    tokens: &mut Vec<InlineTextSegment>,
+    word: &mut String,
+    style: &ComputedStyle,
+    pending_space: &mut bool,
+) {
+    if word.is_empty() {
+        return;
     }
-    lines
+    if *pending_space
+        && !tokens.is_empty()
+        && !tokens
+            .last()
+            .is_some_and(|token: &InlineTextSegment| token.text == "\n")
+    {
+        tokens.push(InlineTextSegment {
+            text: " ".to_string(),
+            style: style.clone(),
+        });
+    }
+    tokens.push(InlineTextSegment {
+        text: std::mem::take(word),
+        style: style.clone(),
+    });
+    *pending_space = false;
+}
+
+fn wrap_one_inline_line(
+    tokens: &[InlineTextSegment],
+    start: usize,
+    available_width: f32,
+    no_wrap: bool,
+) -> (Vec<InlineTextSegment>, usize) {
+    let mut line = Vec::new();
+    let mut current_width = 0.0_f32;
+    let mut pending_space = None;
+    let mut cursor = start;
+
+    while cursor < tokens.len() {
+        let token = &tokens[cursor];
+        if token.text == "\n" {
+            return (line, cursor + 1);
+        }
+        if token.text == " " {
+            if !line.is_empty() {
+                pending_space = Some(token.clone());
+            }
+            cursor += 1;
+            continue;
+        }
+
+        let token_width = inline_segments_wrap_width(std::slice::from_ref(token), available_width);
+        let space_width = pending_space
+            .as_ref()
+            .map(|space| inline_segments_wrap_width(std::slice::from_ref(space), available_width))
+            .unwrap_or(0.0);
+        let needed_width = if line.is_empty() {
+            token_width
+        } else {
+            space_width + token_width
+        };
+
+        if !no_wrap && !line.is_empty() && current_width + needed_width > available_width {
+            return (line, cursor);
+        }
+
+        if let Some(space) = pending_space.take() {
+            line.push(space);
+            current_width += space_width;
+        }
+        line.push(token.clone());
+        current_width += token_width;
+        cursor += 1;
+    }
+
+    (line, cursor)
 }
 
 fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f32) -> f32 {
@@ -10108,6 +10273,56 @@ mod tests {
             cleared_text.y,
             float_rect.y
         );
+    }
+
+    #[test]
+    fn inline_segments_wrap_around_float_and_preserve_styles_and_breaks() {
+        let html = r##"
+            <style>
+                @page { size: Letter; margin: 0; }
+                body { font-size: 12pt; line-height: 14pt; }
+                p { margin: 0; }
+                .left { float: left; width: 96pt; height: 20pt; margin-right: 16pt; background: #2563eb; }
+                strong { color: #dc2626; font-weight: 700; }
+                a { color: #2563eb; }
+            </style>
+            <div class="left"></div>
+            <p>Intro <strong>emphasis</strong> continues beside the float with enough words to recover the full line width after the box ends and <a href="#details">link</a>. <br>Hard break keeps this text on its own line.</p>
+        "##;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &crate::RenderOptions::default());
+        let text_runs = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first = text_runs.first().expect("inline text beside float");
+        let emphasis = text_runs
+            .iter()
+            .find(|text| text.text == "emphasis")
+            .expect("styled inline segment");
+        let link = text_runs
+            .iter()
+            .find(|text| text.text == "link")
+            .expect("anchor inline segment");
+        let hard_break = text_runs
+            .iter()
+            .find(|text| text.text == "Hard")
+            .expect("text after br");
+
+        assert!(
+            first.x > 90.0,
+            "first inline line should avoid float: {first:?}"
+        );
+        assert_eq!(emphasis.font_weight, FontWeight::Bold);
+        assert!(emphasis.color.r > 0.7 && emphasis.color.g < 0.3);
+        assert!(link.color.b > 0.7 && link.color.r < 0.3);
+        assert!(text_runs.iter().any(|text| text.x < first.x));
+        assert!(hard_break.y < first.y, "br should advance to another line");
     }
 
     #[test]

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Inline float flow fixture</title>
+  <style>
+    @page { size: Letter; margin: 28pt; }
+    body { margin: 0; color: #172033; font-family: sans-serif; font-size: 12pt; line-height: 15pt; }
+    .float-left {
+      float: left;
+      width: 128pt;
+      height: 42pt;
+      margin: 0 18pt 8pt 0;
+      border-radius: 8pt;
+      background: #2563eb;
+    }
+    p { margin: 0 0 14pt; }
+    strong { color: #b91c1c; font-weight: 700; }
+    em { color: #047857; font-style: italic; }
+    a { color: #1d4ed8; text-decoration: underline; }
+    .break { color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="float-left"></div>
+  <p>
+    Texto normal junto a un float con segmentos <strong>en negrita</strong>,
+    <em>énfasis</em> y un <a href="#details">enlace</a>. La primera línea
+    debe respetar el espacio ocupado y las líneas siguientes deben recuperar
+    el ancho completo cuando termina la caja flotante.<br>
+    <span class="break">Este salto explícito conserva su propia línea y mantiene los estilos inline.</span>
+  </p>
+  <p id="details">El contenido posterior continúa en el flujo normal sin quedar atrapado en el ancho del float.</p>
+</body>
+</html>
