@@ -1,0 +1,18 @@
+:root {
+  --linked-brand: rgb(37 99 235);
+  --linked-surface: color-mix(in srgb, var(--linked-brand), transparent 94%);
+}
+.linked-card {
+  margin: 2rem 3rem;
+  padding: 1.5rem;
+  border: 2px solid #2563eb66;
+  border-radius: 1rem;
+  background: var(--linked-surface);
+  box-shadow: 0 1rem 2rem rgb(15 23 42 / 12%);
+}
+.linked-card h1 {
+  margin: 0 0 0.75rem;
+  color: var(--linked-brand);
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}

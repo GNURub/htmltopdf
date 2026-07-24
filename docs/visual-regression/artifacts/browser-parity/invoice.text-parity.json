@@ -1,0 +1,49 @@
+{
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.pdf",
+  "chromium_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.pdf",
+  "htmlpdf_page_count": 3,
+  "chromium_page_count": 3,
+  "page_count_delta": 0,
+  "mode": "layout",
+  "pages_compared": 3,
+  "mean_sequence_ratio": 0.9716704766742866,
+  "min_sequence_ratio": 0.9354838709677419,
+  "min_sequence_ratio_page": 1,
+  "threshold_ratio": null,
+  "passed_threshold": null,
+  "page_metrics": [
+    {
+      "page": 1,
+      "sequence_ratio": 0.9354838709677419,
+      "token_jaccard": 0.828125,
+      "htmlpdf_char_count": 790,
+      "chromium_char_count": 822,
+      "htmlpdf_token_count": 158,
+      "chromium_token_count": 189,
+      "htmlpdf_excerpt": "northstar labs invoice no. inv-2026-1001 design systems · automation · pdf issue date 15 may 2026 • paid invoice due date 29 may 2026 currency eur invoice #1001 a production-grade document fixture with gradients, svgs, s…",
+      "chromium_excerpt": "northstar labs invoice inv-2026- d e s i g n s y s t e m s · a u t o m at i o n · p d f no. 1001 issue date 15 may 2026 ● paid invoice due date 29 may 2026 invoice #1001 currency eur a production-grade document fixture w…"
+    },
+    {
+      "page": 2,
+      "sequence_ratio": 0.9795275590551181,
+      "token_jaccard": 0.924812030075188,
+      "htmlpdf_char_count": 950,
+      "chromium_char_count": 955,
+      "htmlpdf_token_count": 211,
+      "chromium_token_count": 215,
+      "htmlpdf_excerpt": "service qty rate amount html/css fixture system 12 h €95.00 €1,140.00 reusable invoice templates, spacing scale, typography rules, and snapshot-oriented examples. deterministic scripting layer 10 h €95.00 €950.00 limited…",
+      "chromium_excerpt": "service qty rate amount html/css fixture system 12 h €95.00 €1,140.00 reusable invoice templates, spacing scale, typography rules, and snapshot-oriented examples. deterministic scripting layer 10 h €95.00 €950.00 limited…"
+    },
+    {
+      "page": 3,
+      "sequence_ratio": 1.0,
+      "token_jaccard": 1.0,
+      "htmlpdf_char_count": 108,
+      "chromium_char_count": 108,
+      "htmlpdf_token_count": 25,
+      "chromium_token_count": 25,
+      "htmlpdf_excerpt": "authorized signature northstar labs s.l. · madrid · es-b12345678 support@northstar.example · +34 900 000 001",
+      "chromium_excerpt": "authorized signature northstar labs s.l. · madrid · es-b12345678 support@northstar.example · +34 900 000 001"
+    }
+  ]
+}

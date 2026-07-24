@@ -1,0 +1,122 @@
+{
+  "left": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.png",
+  "right": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.png",
+  "left_size": [
+    1275,
+    1650
+  ],
+  "right_size": [
+    1275,
+    1650
+  ],
+  "compared_size": [
+    1275,
+    1650
+  ],
+  "size_delta": [
+    0,
+    0
+  ],
+  "tile_size": [
+    160,
+    160
+  ],
+  "hotspots": [
+    {
+      "x": 320,
+      "y": 1280,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 17992.1,
+      "rmse_normalized": 0.274541
+    },
+    {
+      "x": 480,
+      "y": 320,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 17883.8,
+      "rmse_normalized": 0.27289
+    },
+    {
+      "x": 160,
+      "y": 320,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 17642.0,
+      "rmse_normalized": 0.2692
+    },
+    {
+      "x": 160,
+      "y": 1280,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 17490.8,
+      "rmse_normalized": 0.266893
+    },
+    {
+      "x": 320,
+      "y": 320,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 17260.6,
+      "rmse_normalized": 0.263381
+    },
+    {
+      "x": 960,
+      "y": 1280,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 15282.3,
+      "rmse_normalized": 0.233193
+    },
+    {
+      "x": 320,
+      "y": 160,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 15087.8,
+      "rmse_normalized": 0.230224
+    },
+    {
+      "x": 160,
+      "y": 1120,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 15060.1,
+      "rmse_normalized": 0.229803
+    },
+    {
+      "x": 320,
+      "y": 800,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 14587.6,
+      "rmse_normalized": 0.222593
+    },
+    {
+      "x": 800,
+      "y": 800,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 14437.9,
+      "rmse_normalized": 0.220308
+    },
+    {
+      "x": 800,
+      "y": 1280,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 14362.5,
+      "rmse_normalized": 0.219158
+    },
+    {
+      "x": 640,
+      "y": 800,
+      "width": 160,
+      "height": 160,
+      "rmse_absolute": 13923.8,
+      "rmse_normalized": 0.212464
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "html": "examples/invoice.html",
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.pdf",
+  "browser_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.pdf",
+  "htmlpdf_page_count": 3,
+  "browser_page_count": 3,
+  "pages_mode": "all",
+  "pages_compared": 3,
+  "page_count_delta": 0,
+  "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.png",
+  "browser_png": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.png",
+  "diff_png": "docs/visual-regression/artifacts/browser-parity/invoice.diff.png",
+  "htmlpdf_size": [
+    1275,
+    1650
+  ],
+  "browser_size": [
+    1275,
+    1650
+  ],
+  "browser_raster_was_resized_for_metric": false,
+  "rmse_absolute": 8513.35,
+  "rmse_normalized": 0.129905,
+  "mean_rmse_normalized": 0.10341723333333334,
+  "max_rmse_normalized": 0.129905,
+  "max_rmse_page": 1,
+  "page_metrics": [
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/invoice.diff.png",
+      "htmlpdf_size": [
+        1275,
+        1650
+      ],
+      "browser_size": [
+        1275,
+        1650
+      ],
+      "browser_raster_was_resized_for_metric": false,
+      "rmse_absolute": 8513.35,
+      "rmse_normalized": 0.129905,
+      "page": 1
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.p2.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.p2.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/invoice.p2.diff.png",
+      "htmlpdf_size": [
+        1275,
+        1650
+      ],
+      "browser_size": [
+        1275,
+        1650
+      ],
+      "browser_raster_was_resized_for_metric": false,
+      "rmse_absolute": 8412.11,
+      "rmse_normalized": 0.12836,
+      "page": 2
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.p3.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.p3.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/invoice.p3.diff.png",
+      "htmlpdf_size": [
+        1275,
+        1650
+      ],
+      "browser_size": [
+        1275,
+        1650
+      ],
+      "browser_raster_was_resized_for_metric": false,
+      "rmse_absolute": 3406.95,
+      "rmse_normalized": 0.0519867,
+      "page": 3
+    }
+  ],
+  "threshold_rmse_normalized": null,
+  "passed_threshold": null
+}

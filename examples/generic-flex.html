@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic flex fixture</title>
+  <style>
+    .dashboard {
+      margin: 24px 48px;
+      padding: 20px;
+      background: #f8fafc;
+      border-radius: 14px;
+    }
+    h1 { color: #1d4ed8; }
+    .cards {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+    }
+    .metric {
+      padding: 14px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+    }
+    .metric strong { color: #0f172a; font-size: 20px; }
+    .metric p { color: #475569; line-height: 18px; }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 18px;
+    }
+  </style>
+</head>
+<body>
+  <main class="dashboard">
+    <h1>Generic flex rows</h1>
+    <section class="cards">
+      <article class="metric"><strong>24 h</strong><p>Architecture sprint</p></article>
+      <article class="metric"><strong>12 h</strong><p>Fixture system</p></article>
+      <article class="metric"><strong>8 h</strong><p>CLI packaging</p></article>
+    </section>
+    <section class="stack">
+      <p>Column flex gap should create vertical rhythm.</p>
+      <p>Real reports use flex-direction: column for hero and meta stacks.</p>
+    </section>
+  </main>
+</body>
+</html>

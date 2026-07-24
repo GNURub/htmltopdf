@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hidden and display contents fixture</title>
+  <style>
+    body { margin: 2rem; font-size: 1rem; }
+    .contents { display: contents; }
+    .inline-box { display: inline-block; color: rgb(37 99 235); }
+    .flow { display: flow-root; border-left: 0.25rem solid #2563eb; padding-left: 1rem; }
+    .hidden-css { visibility: hidden; }
+  </style>
+</head>
+<body>
+  <main class="flow">
+    <div class="contents"><p>Visible text through display contents.</p></div>
+    <p class="inline-box">Inline-block text should render.</p>
+    <p hidden>This hidden attribute text must not render.</p>
+    <p aria-hidden="true">This aria-hidden text must still render visually.</p>
+    <p class="hidden-css">This visibility-hidden text must not render.</p>
+    <template><p>This template text must not render.</p></template>
+    <iframe srcdoc="<p>This iframe srcdoc must not render as text.</p>"></iframe>
+  </main>
+</body>
+</html>

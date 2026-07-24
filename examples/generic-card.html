@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic card fixture</title>
+  <style>
+    body { margin: 0; color: #0f172a; }
+    .card {
+      box-sizing: border-box;
+      margin: 24px;
+      padding: 24px;
+      background-color: #eff6ff;
+      border-radius: 16px;
+    }
+    .eyebrow { color: #2563eb; font-weight: 700; font-size: 12px; }
+    h1 { margin-bottom: 12px; }
+    p { color: #475569; line-height: 20px; }
+    .nested {
+      margin-top: 16px;
+      padding: 16px;
+      background: #ffffff;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">GENERIC HTML FIXTURE</p>
+    <h1>Cards, padding and rounded backgrounds</h1>
+    <p>This fixture must render through the generic pipeline, not through any invoice-specific compositor.</p>
+    <section class="nested">
+      <h2>Nested section</h2>
+      <p>Nested containers should indent text and paint their own background behind the content.</p>
+    </section>
+  </main>
+</body>
+</html>

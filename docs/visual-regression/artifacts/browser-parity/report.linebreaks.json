@@ -1,0 +1,308 @@
+{
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.pdf",
+  "chromium_pdf": "docs/visual-regression/artifacts/browser-parity/report.chromium.pdf",
+  "y_tolerance": 2.0,
+  "x_gap_threshold": 160.0,
+  "ignore_word_spacing": false,
+  "htmlpdf_line_count": 855,
+  "chromium_line_count": 855,
+  "mean_sequence_ratio": 1.0,
+  "min_sequence_ratio": 1.0,
+  "min_sequence_ratio_page": 1,
+  "page_metrics": [
+    {
+      "page": 1,
+      "left_line_count": 15,
+      "right_line_count": 15,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 2,
+      "left_line_count": 16,
+      "right_line_count": 16,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 3,
+      "left_line_count": 14,
+      "right_line_count": 14,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 4,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 5,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 6,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 7,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 8,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 9,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 10,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 11,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 12,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 13,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 14,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 15,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 16,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 17,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 18,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 19,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 20,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 21,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 22,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 23,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 24,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 25,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 26,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 27,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 28,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 29,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 30,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 31,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 32,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 33,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 34,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 35,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 36,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 37,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 38,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 39,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 40,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 41,
+      "left_line_count": 21,
+      "right_line_count": 21,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    },
+    {
+      "page": 42,
+      "left_line_count": 12,
+      "right_line_count": 12,
+      "sequence_ratio": 1.0,
+      "diffs": []
+    }
+  ]
+}

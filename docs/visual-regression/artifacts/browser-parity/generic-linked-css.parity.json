@@ -1,0 +1,21 @@
+{
+  "html": "examples/generic-linked-css.html",
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/generic-linked-css.htmlpdf.pdf",
+  "browser_pdf": "docs/visual-regression/artifacts/browser-parity/generic-linked-css.chromium.pdf",
+  "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/generic-linked-css.htmlpdf.png",
+  "browser_png": "docs/visual-regression/artifacts/browser-parity/generic-linked-css.chromium.png",
+  "diff_png": "docs/visual-regression/artifacts/browser-parity/generic-linked-css.diff.png",
+  "htmlpdf_size": [
+    1240,
+    1755
+  ],
+  "browser_size": [
+    1275,
+    1650
+  ],
+  "browser_raster_was_resized_for_metric": true,
+  "rmse_absolute": 4094.48,
+  "rmse_normalized": 0.0624777,
+  "threshold_rmse_normalized": null,
+  "passed_threshold": null
+}

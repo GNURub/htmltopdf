@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic table fixture</title>
+  <style>
+    .sheet {
+      margin: 24px 48px;
+      padding: 20px;
+      background: #f8fafc;
+      border-radius: 14px;
+    }
+    h1 { color: #1d4ed8; }
+    table { margin-top: 12px; margin-bottom: 12px; border-collapse: collapse; }
+    th { background: #dbeafe; color: #0f172a; font-weight: 700; text-align: left; padding: 8px; }
+    td { padding: 8px; color: #475569; }
+    .amount { text-align: right; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <h1>Generic table layout</h1>
+    <table>
+      <thead>
+        <tr><th>Service</th><th>Qty</th><th class="amount">Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Renderer architecture</td><td>24 h</td><td class="amount">EUR 2,280.00</td></tr>
+        <tr><td>Fixture system</td><td>12 h</td><td class="amount">EUR 1,140.00</td></tr>
+        <tr><td>CLI packaging and service boundary</td><td>8 h</td><td class="amount">EUR 760.00</td></tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

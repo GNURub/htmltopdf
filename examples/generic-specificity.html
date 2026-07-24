@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic specificity fixture</title>
+  <style>
+    .panel {
+      margin: 24px;
+      padding: 18px;
+      background: #f8fafc;
+      border-radius: 14px;
+    }
+    #specific-title { color: #2563eb; }
+    h1 { color: #dc2626; }
+    .panel .message { color: #475569; }
+    p { color: #16a34a; }
+    .specific-where { color: #2563eb; }
+    :where(.specific-where) { color: #dc2626; }
+    :is(#missing-specific-id, .specific-is) { color: #2563eb; }
+    .specific-is { color: #dc2626; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1 id="specific-title">Specificity beats later tag rules</h1>
+    <p class="message">This paragraph should use the class descendant color, not the later tag color.</p>
+    <p class="specific-where">:where() must not add specificity above normal class rules.</p>
+    <p class="specific-is">:is() uses the max argument specificity for cascade ordering.</p>
+  </main>
+</body>
+</html>

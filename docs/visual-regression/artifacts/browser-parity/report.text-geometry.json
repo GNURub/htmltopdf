@@ -1,0 +1,473 @@
+{
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.pdf",
+  "chromium_pdf": "docs/visual-regression/artifacts/browser-parity/report.chromium.pdf",
+  "htmlpdf_word_count": 4306,
+  "chromium_word_count": 4306,
+  "aligned_words": 4306,
+  "mean_abs_dx": 9.6386,
+  "mean_abs_dy": 9.4712,
+  "mean_abs_width_delta": 0.2641,
+  "mean_width_ratio": 0.9842,
+  "largest_deltas": [
+    {
+      "page": 2,
+      "word": "PAGO",
+      "left_index": 97,
+      "right_index": 97,
+      "left": {
+        "x_min": 434.255,
+        "y_min": 550.682,
+        "width": 19.611,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 449.433,
+        "y_min": 596.821,
+        "width": 20.229,
+        "height": 7.625
+      },
+      "dx": -15.178,
+      "dy": -46.14,
+      "width_delta": -0.618,
+      "width_ratio": 0.9695,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "0",
+      "left_index": 103,
+      "right_index": 103,
+      "left": {
+        "x_min": 452.09,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 464.883,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": -12.793,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "DE",
+      "left_index": 96,
+      "right_index": 96,
+      "left": {
+        "x_min": 422.423,
+        "y_min": 550.682,
+        "width": 9.444,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 437.04,
+        "y_min": 596.821,
+        "width": 9.819,
+        "height": 7.625
+      },
+      "dx": -14.617,
+      "dy": -46.14,
+      "width_delta": -0.374,
+      "width_ratio": 0.9619,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "PENDIENTES",
+      "left_index": 95,
+      "right_index": 95,
+      "left": {
+        "x_min": 375.62,
+        "y_min": 550.682,
+        "width": 44.416,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 387.809,
+        "y_min": 596.821,
+        "width": 46.657,
+        "height": 7.625
+      },
+      "dx": -12.189,
+      "dy": -46.14,
+      "width_delta": -2.241,
+      "width_ratio": 0.952,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "grupo",
+      "left_index": 90,
+      "right_index": 90,
+      "left": {
+        "x_min": 179.791,
+        "y_min": 503.096,
+        "width": 29.592,
+        "height": 17.069
+      },
+      "right": {
+        "x_min": 199.08,
+        "y_min": 540.118,
+        "width": 32.519,
+        "height": 14.663
+      },
+      "dx": -19.289,
+      "dy": -37.022,
+      "width_delta": -2.926,
+      "width_ratio": 0.91,
+      "height_ratio": 1.1641
+    },
+    {
+      "page": 1,
+      "word": "Reebok",
+      "left_index": 8,
+      "right_index": 8,
+      "left": {
+        "x_min": 392.35,
+        "y_min": 86.642,
+        "width": 76.244,
+        "height": 34.125
+      },
+      "right": {
+        "x_min": 438.271,
+        "y_min": 86.487,
+        "width": 86.54,
+        "height": 29.326
+      },
+      "dx": -45.921,
+      "dy": 0.156,
+      "width_delta": -10.297,
+      "width_ratio": 0.881,
+      "height_ratio": 1.1636
+    },
+    {
+      "page": 2,
+      "word": "del",
+      "left_index": 89,
+      "right_index": 89,
+      "left": {
+        "x_min": 161.504,
+        "y_min": 503.096,
+        "width": 15.525,
+        "height": 17.069
+      },
+      "right": {
+        "x_min": 178.969,
+        "y_min": 540.118,
+        "width": 16.99,
+        "height": 14.663
+      },
+      "dx": -17.465,
+      "dy": -37.022,
+      "width_delta": -1.465,
+      "width_ratio": 0.9138,
+      "height_ratio": 1.1641
+    },
+    {
+      "page": 2,
+      "word": "campañas",
+      "left_index": 88,
+      "right_index": 88,
+      "left": {
+        "x_min": 108.79,
+        "y_min": 503.096,
+        "width": 49.952,
+        "height": 17.069
+      },
+      "right": {
+        "x_min": 117.129,
+        "y_min": 540.118,
+        "width": 58.718,
+        "height": 14.663
+      },
+      "dx": -8.339,
+      "dy": -37.022,
+      "width_delta": -8.767,
+      "width_ratio": 0.8507,
+      "height_ratio": 1.1641
+    },
+    {
+      "page": 2,
+      "word": "PENDIENTES",
+      "left_index": 93,
+      "right_index": 93,
+      "left": {
+        "x_min": 231.36,
+        "y_min": 550.682,
+        "width": 44.416,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 226.898,
+        "y_min": 596.821,
+        "width": 46.657,
+        "height": 7.625
+      },
+      "dx": 4.462,
+      "dy": -46.14,
+      "width_delta": -2.241,
+      "width_ratio": 0.952,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "0",
+      "left_index": 101,
+      "right_index": 101,
+      "left": {
+        "x_min": 272.1,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 268.781,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": 3.319,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "9",
+      "left_index": 99,
+      "right_index": 99,
+      "left": {
+        "x_min": 121.46,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 123.48,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": -2.02,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "2",
+      "left_index": 100,
+      "right_index": 100,
+      "left": {
+        "x_min": 196.69,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 195.187,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": 1.503,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "APROBADAS",
+      "left_index": 92,
+      "right_index": 92,
+      "left": {
+        "x_min": 157.8,
+        "y_min": 550.682,
+        "width": 44.082,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 154.781,
+        "y_min": 596.821,
+        "width": 45.183,
+        "height": 7.625
+      },
+      "dx": 3.019,
+      "dy": -46.14,
+      "width_delta": -1.101,
+      "width_ratio": 0.9756,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "0",
+      "left_index": 104,
+      "right_index": 104,
+      "left": {
+        "x_min": 532.75,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 534.129,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": -1.379,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "0",
+      "left_index": 102,
+      "right_index": 102,
+      "left": {
+        "x_min": 347.51,
+        "y_min": 578.21,
+        "width": 5.0,
+        "height": 13.0
+      },
+      "right": {
+        "x_min": 346.242,
+        "y_min": 626.933,
+        "width": 5.11,
+        "height": 10.264
+      },
+      "dx": 1.268,
+      "dy": -48.723,
+      "width_delta": -0.11,
+      "width_ratio": 0.9785,
+      "height_ratio": 1.2665
+    },
+    {
+      "page": 2,
+      "word": "RECHAZADAS",
+      "left_index": 94,
+      "right_index": 94,
+      "left": {
+        "x_min": 304.12,
+        "y_min": 550.682,
+        "width": 48.971,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 301.336,
+        "y_min": 596.821,
+        "width": 49.688,
+        "height": 7.625
+      },
+      "dx": 2.784,
+      "dy": -46.14,
+      "width_delta": -0.716,
+      "width_ratio": 0.9856,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "participantes",
+      "left_index": 82,
+      "right_index": 82,
+      "left": {
+        "x_min": 130.196,
+        "y_min": 383.238,
+        "width": 74.843,
+        "height": 20.475
+      },
+      "right": {
+        "x_min": 139.005,
+        "y_min": 413.992,
+        "width": 83.631,
+        "height": 17.596
+      },
+      "dx": -8.809,
+      "dy": -30.754,
+      "width_delta": -8.789,
+      "width_ratio": 0.8949,
+      "height_ratio": 1.1636
+    },
+    {
+      "page": 2,
+      "word": "COMPLETADAS",
+      "left_index": 91,
+      "right_index": 91,
+      "left": {
+        "x_min": 72.41,
+        "y_min": 550.682,
+        "width": 53.867,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 73.805,
+        "y_min": 596.821,
+        "width": 54.451,
+        "height": 7.625
+      },
+      "dx": -1.395,
+      "dy": -46.14,
+      "width_delta": -0.584,
+      "width_ratio": 0.9893,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 2,
+      "word": "ELIMINADAS",
+      "left_index": 98,
+      "right_index": 98,
+      "left": {
+        "x_min": 494.28,
+        "y_min": 550.682,
+        "width": 45.549,
+        "height": 8.879
+      },
+      "right": {
+        "x_min": 494.52,
+        "y_min": 596.821,
+        "width": 44.386,
+        "height": 7.625
+      },
+      "dx": -0.24,
+      "dy": -46.14,
+      "width_delta": 1.164,
+      "width_ratio": 1.0262,
+      "height_ratio": 1.1645
+    },
+    {
+      "page": 1,
+      "word": "Campaña",
+      "left_index": 7,
+      "right_index": 7,
+      "left": {
+        "x_min": 292.961,
+        "y_min": 86.642,
+        "width": 94.406,
+        "height": 34.125
+      },
+      "right": {
+        "x_min": 323.459,
+        "y_min": 86.487,
+        "width": 109.093,
+        "height": 29.326
+      },
+      "dx": -30.498,
+      "dy": 0.156,
+      "width_delta": -14.687,
+      "width_ratio": 0.8654,
+      "height_ratio": 1.1636
+    }
+  ]
+}

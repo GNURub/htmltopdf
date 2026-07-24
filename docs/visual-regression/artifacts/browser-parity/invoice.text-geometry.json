@@ -1,0 +1,473 @@
+{
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.htmlpdf.pdf",
+  "chromium_pdf": "docs/visual-regression/artifacts/browser-parity/invoice.chromium.pdf",
+  "htmlpdf_word_count": 264,
+  "chromium_word_count": 300,
+  "aligned_words": 219,
+  "mean_abs_dx": 18.1459,
+  "mean_abs_dy": 9.2005,
+  "mean_abs_width_delta": 4.3077,
+  "mean_width_ratio": 0.8899,
+  "largest_deltas": [
+    {
+      "page": 1,
+      "word": "SVGs,",
+      "left_index": 35,
+      "right_index": 56,
+      "left": {
+        "x_min": 298.627,
+        "y_min": 247.208,
+        "width": 25.73,
+        "height": 12.675
+      },
+      "right": {
+        "x_min": 90.0,
+        "y_min": 258.885,
+        "width": 25.487,
+        "height": 15.21
+      },
+      "dx": 208.627,
+      "dy": -11.677,
+      "width_delta": 0.244,
+      "width_ratio": 1.0096,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 1,
+      "word": "list,",
+      "left_index": 112,
+      "right_index": 143,
+      "left": {
+        "x_min": 304.858,
+        "y_min": 666.633,
+        "width": 12.152,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 102.0,
+        "y_min": 679.845,
+        "width": 13.398,
+        "height": 12.87
+      },
+      "dx": 202.858,
+      "dy": -13.212,
+      "width_delta": -1.246,
+      "width_ratio": 0.907,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 2,
+      "word": "and",
+      "left_index": 143,
+      "right_index": 174,
+      "left": {
+        "x_min": 303.942,
+        "y_min": 89.763,
+        "width": 11.913,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 102.0,
+        "y_min": 101.595,
+        "width": 14.8,
+        "height": 12.87
+      },
+      "dx": 201.942,
+      "dy": -11.832,
+      "width_delta": -2.887,
+      "width_ratio": 0.8049,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 2,
+      "word": "without",
+      "left_index": 157,
+      "right_index": 188,
+      "left": {
+        "x_min": 297.062,
+        "y_min": 155.012,
+        "width": 25.212,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 102.0,
+        "y_min": 167.595,
+        "width": 29.758,
+        "height": 12.87
+      },
+      "dx": 195.062,
+      "dy": -12.582,
+      "width_delta": -4.546,
+      "width_ratio": 0.8472,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 1,
+      "word": "payment",
+      "left_index": 42,
+      "right_index": 63,
+      "left": {
+        "x_min": 273.716,
+        "y_min": 261.837,
+        "width": 33.579,
+        "height": 12.675
+      },
+      "right": {
+        "x_min": 90.0,
+        "y_min": 273.885,
+        "width": 40.599,
+        "height": 15.21
+      },
+      "dx": 183.716,
+      "dy": -12.047,
+      "width_delta": -7.02,
+      "width_ratio": 0.8271,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "signature",
+      "left_index": 250,
+      "right_index": 286,
+      "left": {
+        "x_min": 171.341,
+        "y_min": 168.894,
+        "width": 58.986,
+        "height": 20.917
+      },
+      "right": {
+        "x_min": 132.875,
+        "y_min": 79.447,
+        "width": 31.148,
+        "height": 10.881
+      },
+      "dx": 38.467,
+      "dy": 89.448,
+      "width_delta": 27.838,
+      "width_ratio": 1.8937,
+      "height_ratio": 1.9223
+    },
+    {
+      "page": 2,
+      "word": "1.5%",
+      "left_index": 220,
+      "right_index": 241,
+      "left": {
+        "x_min": 104.85,
+        "y_min": 435.207,
+        "width": 20.309,
+        "height": 12.675
+      },
+      "right": {
+        "x_min": 231.593,
+        "y_min": 424.635,
+        "width": 21.869,
+        "height": 15.21
+      },
+      "dx": -126.743,
+      "dy": 10.573,
+      "width_delta": -1.56,
+      "width_ratio": 0.9287,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 2,
+      "word": "stress",
+      "left_index": 210,
+      "right_index": 218,
+      "left": {
+        "x_min": 104.85,
+        "y_min": 341.457,
+        "width": 21.665,
+        "height": 12.675
+      },
+      "right": {
+        "x_min": 226.748,
+        "y_min": 330.885,
+        "width": 26.861,
+        "height": 15.21
+      },
+      "dx": -121.898,
+      "dy": 10.573,
+      "width_delta": -5.197,
+      "width_ratio": 0.8065,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "Authorized",
+      "left_index": 249,
+      "right_index": 285,
+      "left": {
+        "x_min": 94.93,
+        "y_min": 168.894,
+        "width": 72.389,
+        "height": 20.917
+      },
+      "right": {
+        "x_min": 95.076,
+        "y_min": 79.447,
+        "width": 35.987,
+        "height": 10.881
+      },
+      "dx": -0.146,
+      "dy": 89.448,
+      "width_delta": 36.402,
+      "width_ratio": 2.0115,
+      "height_ratio": 1.9223
+    },
+    {
+      "page": 3,
+      "word": "001",
+      "left_index": 263,
+      "right_index": 299,
+      "left": {
+        "x_min": 488.568,
+        "y_min": 228.262,
+        "width": 12.375,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 507.834,
+        "y_min": 128.595,
+        "width": 14.157,
+        "height": 12.87
+      },
+      "dx": -19.265,
+      "dy": 99.668,
+      "width_delta": -1.782,
+      "width_ratio": 0.8741,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "support@northstar.example",
+      "left_index": 258,
+      "right_index": 294,
+      "left": {
+        "x_min": 346.85,
+        "y_min": 228.262,
+        "width": 91.69,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 343.957,
+        "y_min": 128.595,
+        "width": 108.47,
+        "height": 12.87
+      },
+      "dx": 2.893,
+      "dy": 99.668,
+      "width_delta": -16.78,
+      "width_ratio": 0.8453,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "000",
+      "left_index": 262,
+      "right_index": 298,
+      "left": {
+        "x_min": 474.131,
+        "y_min": 228.262,
+        "width": 12.375,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 491.532,
+        "y_min": 128.595,
+        "width": 14.157,
+        "height": 12.87
+      },
+      "dx": -17.401,
+      "dy": 99.668,
+      "width_delta": -1.782,
+      "width_ratio": 0.8741,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "900",
+      "left_index": 261,
+      "right_index": 297,
+      "left": {
+        "x_min": 459.693,
+        "y_min": 228.262,
+        "width": 12.375,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 475.23,
+        "y_min": 128.595,
+        "width": 14.157,
+        "height": 12.87
+      },
+      "dx": -15.537,
+      "dy": 99.668,
+      "width_delta": -1.782,
+      "width_ratio": 0.8741,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "ES-B12345678",
+      "left_index": 257,
+      "right_index": 293,
+      "left": {
+        "x_min": 191.589,
+        "y_min": 228.262,
+        "width": 50.878,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 204.047,
+        "y_min": 128.595,
+        "width": 54.887,
+        "height": 12.87
+      },
+      "dx": -12.458,
+      "dy": 99.668,
+      "width_delta": -4.009,
+      "width_ratio": 0.927,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "+34",
+      "left_index": 260,
+      "right_index": 296,
+      "left": {
+        "x_min": 444.728,
+        "y_min": 228.262,
+        "width": 12.903,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 458.928,
+        "y_min": 128.595,
+        "width": 14.157,
+        "height": 12.87
+      },
+      "dx": -14.2,
+      "dy": 99.668,
+      "width_delta": -1.254,
+      "width_ratio": 0.9114,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "·",
+      "left_index": 259,
+      "right_index": 295,
+      "left": {
+        "x_min": 440.603,
+        "y_min": 228.262,
+        "width": 2.062,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 454.572,
+        "y_min": 128.595,
+        "width": 2.211,
+        "height": 12.87
+      },
+      "dx": -13.969,
+      "dy": 99.668,
+      "width_delta": -0.149,
+      "width_ratio": 0.9328,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "·",
+      "left_index": 256,
+      "right_index": 292,
+      "left": {
+        "x_min": 187.464,
+        "y_min": 228.262,
+        "width": 2.062,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 199.691,
+        "y_min": 128.595,
+        "width": 2.211,
+        "height": 12.87
+      },
+      "dx": -12.227,
+      "dy": 99.668,
+      "width_delta": -0.148,
+      "width_ratio": 0.9328,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "Madrid",
+      "left_index": 255,
+      "right_index": 291,
+      "left": {
+        "x_min": 161.113,
+        "y_min": 228.262,
+        "width": 24.288,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 169.752,
+        "y_min": 128.595,
+        "width": 27.794,
+        "height": 12.87
+      },
+      "dx": -8.639,
+      "dy": 99.668,
+      "width_delta": -3.506,
+      "width_ratio": 0.8739,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 2,
+      "word": "Please",
+      "left_index": 224,
+      "right_index": 245,
+      "left": {
+        "x_min": 104.85,
+        "y_min": 449.837,
+        "width": 24.911,
+        "height": 12.675
+      },
+      "right": {
+        "x_min": 200.237,
+        "y_min": 439.635,
+        "width": 29.552,
+        "height": 15.21
+      },
+      "dx": -95.387,
+      "dy": 10.203,
+      "width_delta": -4.641,
+      "width_ratio": 0.843,
+      "height_ratio": 0.8333
+    },
+    {
+      "page": 3,
+      "word": "S.L.",
+      "left_index": 253,
+      "right_index": 289,
+      "left": {
+        "x_min": 141.173,
+        "y_min": 228.262,
+        "width": 13.753,
+        "height": 10.725
+      },
+      "right": {
+        "x_min": 149.977,
+        "y_min": 128.595,
+        "width": 13.274,
+        "height": 12.87
+      },
+      "dx": -8.804,
+      "dy": 99.668,
+      "width_delta": 0.479,
+      "width_ratio": 1.0361,
+      "height_ratio": 0.8333
+    }
+  ]
+}

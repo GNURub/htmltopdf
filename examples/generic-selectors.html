@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic selector fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    .shell {
+      margin: 24px;
+      padding: 20px;
+      background: #f8fafc;
+      border-radius: 14px;
+    }
+    .shell .card.primary {
+      padding: 18px;
+      background: #ecfeff;
+      border-radius: 12px;
+    }
+    section.card h1 { color: #2563eb; }
+    .shell .card.primary p { color: #475569; line-height: 20px; }
+    #selector-target strong { color: #0f172a; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="card primary" id="selector-target">
+      <h1>Descendant and compound selectors</h1>
+      <p><strong>Expected:</strong> this card uses styles from `.shell .card.primary` and `section.card h1`.</p>
+    </section>
+  </main>
+</body>
+</html>

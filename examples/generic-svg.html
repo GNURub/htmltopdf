@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic SVG fixture</title>
+  <style>
+    .sheet {
+      margin: 24px;
+      padding: 20px;
+      background: #f8fafc;
+      border-radius: 14px;
+      color: #2563eb;
+    }
+    svg {
+      width: 160px;
+      margin-bottom: 12px;
+    }
+    .ratio-svg {
+      width: 180px;
+    }
+    .decorated-svg {
+      width: 120px;
+      height: 72px;
+      border: 2px solid #2563eb;
+      border-radius: 12px;
+      filter: drop-shadow(0 10px 16px rgb(15 23 42 / 18%));
+      background: #eff6ff;
+    }
+    h1 { color: #0f172a; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <svg viewBox="0 0 160 96" width="160" height="96" aria-label="Inline SVG shapes">
+      <defs>
+        <linearGradient id="blueWash">
+          <stop offset="0%" stop-color="#dbeafe" stop-opacity="0.94" />
+          <stop offset="100%" stop-color="#bfdbfe" stop-opacity="0.72" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="152" height="88" rx="14" fill="url(#blueWash)" stroke="#1e40af" stroke-width="2" stroke-opacity="0.4" />
+      <circle cx="46" cy="48" r="22" fill="currentColor" />
+      <circle cx="46" cy="48" r="30" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-opacity="0.45" />
+      <polygon points="92,26 132,48 92,70" fill="#0f172a" />
+      <g transform="translate(8 4) scale(0.9)">
+        <line x1="92" y1="16" x2="132" y2="16" stroke="#2563eb" stroke-width="3" stroke-linecap="round" />
+      </g>
+      <line x1="16" y1="84" x2="144" y2="84" stroke="#1d4ed8" stroke-width="4" stroke-linecap="round" />
+      <path d="M18 20 H54 V34 H18 Z M78 20 C94 8, 120 8, 136 20 Q116 36, 78 20 Z" fill="#60a5fa" stroke="#1e40af" stroke-width="2" stroke-linecap="round" />
+      <text x="18" y="76" fill="#1e40af" font-size="9">SVG text</text>
+    </svg>
+    <svg class="ratio-svg" viewBox="0 0 260 72" aria-label="Aspect ratio SVG">
+      <path d="M8 48 C34 12 50 54 75 30 C96 10 100 58 126 36 C148 18 160 50 186 28 C208 10 222 38 252 24" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linecap="round" />
+      <text x="8" y="68" fill="#64748b" font-size="11">viewBox ratio</text>
+    </svg>
+    <svg class="decorated-svg" viewBox="0 0 120 72" aria-label="Decorated SVG">
+      <circle cx="36" cy="36" r="18" fill="#2563eb" />
+      <rect x="64" y="22" width="34" height="28" rx="6" fill="#06b6d4" />
+    </svg>
+    <h1>Inline SVG support</h1>
+    <p>Basic svg rect, circle, polygon and line elements should paint in the generic renderer.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,556 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice INV-2026-1001</title>
+  <style>
+    :root {
+      --ink: #102033;
+      --muted: #64748b;
+      --line: #dbeafe;
+      --brand: #2563eb;
+      --brand-dark: #0f172a;
+      --accent: #06b6d4;
+      --soft: #f8fafc;
+      --success: #16a34a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      background:
+        radial-gradient(circle at 8% 8%, rgba(37, 99, 235, 0.14), transparent 24%),
+        radial-gradient(circle at 92% 0%, rgba(6, 182, 212, 0.16), transparent 26%),
+        linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .page {
+      width: 100%;
+      min-height: 100%;
+      padding: 44px;
+      position: relative;
+    }
+
+    .watermark {
+      position: absolute;
+      top: 330px;
+      right: 28px;
+      font-size: 88px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: rgba(37, 99, 235, 0.055);
+      transform: rotate(-28deg);
+      z-index: 0;
+    }
+
+    .card {
+      position: relative;
+      z-index: 1;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 26px 70px rgba(15, 23, 42, 0.10);
+    }
+
+    .hero {
+      color: #ffffff;
+      padding: 34px 38px;
+      background:
+        linear-gradient(135deg, #0f172a 0%, #1d4ed8 52%, #06b6d4 100%);
+      position: relative;
+    }
+
+    .hero-pattern {
+      position: absolute;
+      right: 22px;
+      top: 18px;
+      width: 220px;
+      height: 120px;
+      opacity: 0.34;
+    }
+
+    .header-grid {
+      display: grid;
+      grid-template-columns: 1.3fr 0.7fr;
+      gap: 24px;
+      align-items: start;
+      position: relative;
+      z-index: 2;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .logo {
+      width: 64px;
+      height: 64px;
+      flex: 0 0 auto;
+      filter: drop-shadow(0 12px 18px rgba(0,0,0,0.20));
+    }
+
+    .brand-name {
+      font-size: 23px;
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      margin: 0;
+    }
+
+    .brand-subtitle {
+      margin: 2px 0 0;
+      color: rgba(255,255,255,0.72);
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 48px;
+      line-height: 1;
+      letter-spacing: -0.07em;
+      color: #ffffff;
+    }
+
+    .hero-copy {
+      margin: 14px 0 0;
+      color: rgba(255,255,255,0.78);
+      max-width: 430px;
+      font-size: 13px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 13px;
+      border-radius: 999px;
+      background: rgba(22, 163, 74, 0.18);
+      color: #dcfce7;
+      border: 1px solid rgba(187, 247, 208, 0.28);
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .meta-box {
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.22);
+      border-radius: 18px;
+      padding: 18px;
+      backdrop-filter: blur(18px);
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.16);
+    }
+
+    .meta-row:last-child { border-bottom: 0; }
+    .meta-label { color: rgba(255,255,255,0.62); font-size: 11px; }
+    .meta-value { color: #ffffff; font-weight: 700; text-align: right; }
+
+    .content {
+      padding: 34px 38px 38px;
+    }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      margin-bottom: 30px;
+    }
+
+    .info-panel {
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 20px;
+      background:
+        linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    }
+
+    .panel-title {
+      margin: 0 0 12px;
+      color: var(--brand);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .company-name,
+    .client-name {
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .address {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .summary-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin: 0 0 30px;
+    }
+
+    .metric {
+      border-radius: 18px;
+      padding: 16px;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+    }
+
+    .metric:nth-child(2) { background: #ecfeff; border-color: #a5f3fc; }
+    .metric:nth-child(3) { background: #f0fdf4; border-color: #bbf7d0; }
+
+    .metric-label {
+      margin: 0 0 5px;
+      color: var(--muted);
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+
+    .metric-value {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 850;
+      letter-spacing: -0.04em;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 26px;
+      overflow: hidden;
+      border-radius: 18px;
+    }
+
+    thead th {
+      padding: 14px 16px;
+      background: #0f172a;
+      color: #e0f2fe;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+
+    tbody td {
+      padding: 16px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+      background: rgba(255,255,255,0.82);
+    }
+
+    tbody tr:nth-child(even) td { background: #f8fafc; }
+    .item-title { margin: 0; font-weight: 800; }
+    .item-desc { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
+    .num { text-align: right; white-space: nowrap; }
+
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 28px;
+      align-items: start;
+    }
+
+    .note-box {
+      border-radius: 20px;
+      padding: 20px;
+      background:
+        linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(6, 182, 212, 0.10));
+      border: 1px dashed #93c5fd;
+    }
+
+    .note-box h3,
+    .payment-box h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--brand-dark);
+    }
+
+    .note-box p,
+    .payment-box p {
+      margin: 0 0 8px;
+      color: var(--muted);
+    }
+
+    .totals {
+      border-radius: 22px;
+      overflow: hidden;
+      border: 1px solid #c7d2fe;
+      background: #ffffff;
+      box-shadow: 0 18px 38px rgba(37, 99, 235, 0.13);
+    }
+
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 13px 18px;
+      border-bottom: 1px solid #e0e7ff;
+    }
+
+    .total-row span:first-child { color: var(--muted); }
+    .total-row strong { font-weight: 850; }
+
+    .grand-total {
+      color: #ffffff;
+      background: linear-gradient(135deg, #1d4ed8, #06b6d4);
+      padding: 20px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .grand-total span { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; }
+    .grand-total strong { font-size: 30px; letter-spacing: -0.06em; }
+
+    .payment-box {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: 1fr 104px;
+      gap: 18px;
+      align-items: center;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      padding: 18px;
+      background: #ffffff;
+    }
+
+    .qr {
+      width: 104px;
+      height: 104px;
+    }
+
+    .footer {
+      margin-top: 28px;
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      color: var(--muted);
+      font-size: 11px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 18px;
+    }
+
+    .signature {
+      margin-top: 22px;
+      width: 220px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="watermark">PAID</div>
+
+    <div class="card">
+      <header class="hero">
+        <svg class="hero-pattern" viewBox="0 0 240 140" aria-hidden="true">
+          <defs>
+            <linearGradient id="patternGradient" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff" stop-opacity="0.78" />
+              <stop offset="100%" stop-color="#bae6fd" stop-opacity="0.16" />
+            </linearGradient>
+          </defs>
+          <circle cx="24" cy="28" r="18" fill="url(#patternGradient)" />
+          <circle cx="84" cy="52" r="34" fill="none" stroke="url(#patternGradient)" stroke-width="10" />
+          <path d="M126 18 C170 16 202 42 218 84" fill="none" stroke="url(#patternGradient)" stroke-width="12" stroke-linecap="round" />
+          <path d="M122 116 L214 116" stroke="#ffffff" stroke-opacity="0.35" stroke-width="8" stroke-linecap="round" />
+        </svg>
+
+        <div class="header-grid">
+          <div>
+            <div class="brand-row">
+              <svg class="logo" viewBox="0 0 80 80" role="img" aria-label="Northstar Labs logo">
+                <defs>
+                  <linearGradient id="logoGradient" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#ffffff" />
+                    <stop offset="55%" stop-color="#cffafe" />
+                    <stop offset="100%" stop-color="#93c5fd" />
+                  </linearGradient>
+                </defs>
+                <rect x="6" y="6" width="68" height="68" rx="20" fill="url(#logoGradient)" />
+                <path d="M22 52 L40 18 L58 52 H48 L40 34 L32 52 Z" fill="#1d4ed8" />
+                <circle cx="40" cy="57" r="4" fill="#06b6d4" />
+              </svg>
+              <div>
+                <p class="brand-name">Northstar Labs</p>
+                <p class="brand-subtitle">Design Systems · Automation · PDF</p>
+              </div>
+            </div>
+
+            <p class="status-pill">● Paid invoice</p>
+            <h1 id="title">Invoice</h1>
+            <p class="hero-copy">A production-grade document fixture with gradients, SVGs, spacious layout, rich metadata, itemized work, payment information, and deterministic JS placeholders.</p>
+          </div>
+
+          <aside class="meta-box">
+            <div class="meta-row"><span class="meta-label">Invoice No.</span><span class="meta-value" id="invoice-number">INV-0000</span></div>
+            <div class="meta-row"><span class="meta-label">Issue Date</span><span class="meta-value">15 May 2026</span></div>
+            <div class="meta-row"><span class="meta-label">Due Date</span><span class="meta-value">29 May 2026</span></div>
+            <div class="meta-row"><span class="meta-label">Currency</span><span class="meta-value">EUR</span></div>
+          </aside>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="section-grid">
+          <div class="info-panel">
+            <p class="panel-title">From</p>
+            <p class="company-name">Northstar Labs S.L.</p>
+            <p class="address">Calle Arquitectura 42<br>28014 Madrid, Spain<br>VAT ES-B12345678<br>billing@northstar.example</p>
+          </div>
+
+          <div class="info-panel">
+            <p class="panel-title">Bill to</p>
+            <p class="client-name" id="customer">Customer placeholder</p>
+            <p class="address">Attn. Finance Department<br>1 Infinite Loop<br>Cupertino, CA 95014<br>United States</p>
+          </div>
+        </section>
+
+        <section class="summary-strip">
+          <div class="metric">
+            <p class="metric-label">Project</p>
+            <p class="metric-value">PDF Engine MVP</p>
+          </div>
+          <div class="metric">
+            <p class="metric-label">Billing Period</p>
+            <p class="metric-value">May 2026</p>
+          </div>
+          <div class="metric">
+            <p class="metric-label">Payment Terms</p>
+            <p class="metric-value">Net 14</p>
+          </div>
+        </section>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th class="num">Qty</th>
+              <th class="num">Rate</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <p class="item-title">Renderer architecture sprint</p>
+                <p class="item-desc">Core pipeline design: parser, style resolver, layout tree, paint list, and PDF backend boundaries.</p>
+              </td>
+              <td class="num">24 h</td>
+              <td class="num">€95.00</td>
+              <td class="num">€2,280.00</td>
+            </tr>
+            <tr>
+              <td>
+                <p class="item-title">HTML/CSS fixture system</p>
+                <p class="item-desc">Reusable invoice templates, spacing scale, typography rules, and snapshot-oriented examples.</p>
+              </td>
+              <td class="num">12 h</td>
+              <td class="num">€95.00</td>
+              <td class="num">€1,140.00</td>
+            </tr>
+            <tr>
+              <td>
+                <p class="item-title">Deterministic scripting layer</p>
+                <p class="item-desc">Limited JavaScript surface for safe document data binding without browser runtime overhead.</p>
+              </td>
+              <td class="num">10 h</td>
+              <td class="num">€95.00</td>
+              <td class="num">€950.00</td>
+            </tr>
+            <tr>
+              <td>
+                <p class="item-title">CLI and service packaging</p>
+                <p class="item-desc">Command-line workflow, API service boundary, examples, and documentation for exportability.</p>
+              </td>
+              <td class="num">8 h</td>
+              <td class="num">€95.00</td>
+              <td class="num">€760.00</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <section class="bottom-grid">
+          <div>
+            <div class="note-box">
+              <h3>Notes</h3>
+              <p>Thank you for trusting Northstar Labs. This invoice is also a stress fixture for the renderer roadmap: gradients, SVG logos, large spacing, complex sections, tabular data, and progressive fallbacks.</p>
+              <p>Late payments may incur a 1.5% monthly service fee. Please include the invoice number in the transfer reference.</p>
+            </div>
+
+            <div class="payment-box">
+              <div>
+                <h3>Payment details</h3>
+                <p><strong>IBAN:</strong> ES91 2100 0418 4502 0005 1332</p>
+                <p><strong>BIC:</strong> CAIXESBBXXX</p>
+                <p><strong>Reference:</strong> INV-2026-1001</p>
+              </div>
+              <svg class="qr" viewBox="0 0 120 120" role="img" aria-label="Payment QR placeholder">
+                <rect width="120" height="120" rx="18" fill="#f8fafc" stroke="#bfdbfe" />
+                <rect x="14" y="14" width="26" height="26" rx="4" fill="#0f172a" />
+                <rect x="80" y="14" width="26" height="26" rx="4" fill="#0f172a" />
+                <rect x="14" y="80" width="26" height="26" rx="4" fill="#0f172a" />
+                <rect x="50" y="50" width="12" height="12" fill="#2563eb" />
+                <rect x="68" y="50" width="10" height="10" fill="#06b6d4" />
+                <rect x="50" y="68" width="10" height="10" fill="#06b6d4" />
+                <rect x="82" y="72" width="18" height="8" fill="#2563eb" />
+                <rect x="58" y="88" width="8" height="18" fill="#0f172a" />
+                <rect x="72" y="92" width="10" height="10" fill="#2563eb" />
+              </svg>
+            </div>
+          </div>
+
+          <aside class="totals">
+            <div class="total-row"><span>Subtotal</span><strong>€5,130.00</strong></div>
+            <div class="total-row"><span>Discount</span><strong>−€250.00</strong></div>
+            <div class="total-row"><span>Taxable Base</span><strong>€4,880.00</strong></div>
+            <div class="total-row"><span>VAT 21%</span><strong>€1,024.80</strong></div>
+            <div class="grand-total"><span>Total due</span><strong>€5,904.80</strong></div>
+          </aside>
+        </section>
+
+        <svg class="signature" viewBox="0 0 260 72" aria-label="Authorized signature">
+          <path d="M8 48 C34 12 50 54 75 30 C96 10 100 58 126 36 C148 18 160 50 186 28 C208 10 222 38 252 24" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linecap="round" />
+          <text x="8" y="68" fill="#64748b" font-size="11">Authorized signature</text>
+        </svg>
+
+        <footer class="footer">
+          <span>Northstar Labs S.L. · Madrid · ES-B12345678</span>
+          <span>support@northstar.example · +34 900 000 001</span>
+        </footer>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    document.querySelector("#title").textContent = "Invoice #1001";
+    document.querySelector("#invoice-number").textContent = "INV-2026-1001";
+    document.querySelector("#customer").textContent = "Ada Lovelace Analytics Inc.";
+  </script>
+</body>
+</html>

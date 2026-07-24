@@ -1,0 +1,54 @@
+{
+    "name": "premium-invoice-visual-regression",
+    "status": "target-reference-missing",
+    "objective": "Fix the collapsed invoice render shown in Image #1 and enable proof of pixel identity when a correct target reference is available.",
+    "artifacts": {
+        "broken_baseline": "docs/visual-regression/artifacts/invoice-before-broken.png",
+        "current_snapshot": "docs/visual-regression/artifacts/invoice-current.png",
+        "broken_diff": "docs/visual-regression/artifacts/invoice-current-vs-before-diff.png",
+        "optional_target": "docs/visual-regression/artifacts/invoice-target.png",
+        "optional_target_diff": "docs/visual-regression/artifacts/invoice-current-vs-target-diff.png",
+        "pdf": "out.pdf"
+    },
+    "commands": {
+        "regenerate_preview": "./scripts/render-invoice-preview.py",
+        "verify_all_no_build": "./scripts/verify-invoice-visual.sh --regenerate",
+        "parity_audit": "./scripts/audit-invoice-parity.py",
+        "pdf_content_audit": "./scripts/audit-invoice-pdf-content.py",
+        "target_check": "INVOICE_TARGET_PNG=/path/to/target.png INVOICE_TARGET_MAE_MAX=0 ./scripts/verify-invoice-visual.sh --regenerate --require-target",
+        "verify_strict_target": "./scripts/verify-invoice-visual.sh --regenerate --require-target",
+        "image_quality_audit": "./scripts/audit-invoice-image-quality.py",
+        "layout_geometry_audit": "./scripts/audit-invoice-layout-geometry.py"
+    },
+    "current_evidence": {
+        "broken_baseline_mae": "28814 (0.439674)",
+        "pdf_page_size": "595 x 842 pts",
+        "pdf_pages": 1,
+        "pdf_version": "1.4",
+        "text_runs": 76,
+        "filled_rectangles": 108,
+        "curved_fills": 55,
+        "stroked_lines": 24,
+        "snapshot_dimensions": "1240x1755",
+        "image_colors": 7032,
+        "image_global_std": 0.299,
+        "hero_mean": 0.383,
+        "hero_colors": 3241,
+        "total_band_std": 0.195,
+        "table_to_notes_gap_pt": 10.0,
+        "table_to_totals_gap_pt": 14.0,
+        "signature_to_footer_gap_pt": 4.0,
+        "totals_to_signature_gap_pt": 6.0
+    },
+    "gates": {
+        "visual_diff_from_broken_baseline": "pass",
+        "preview_rust_parity": "pass",
+        "pdf_content_richness": "pass",
+        "target_pixel_identity": "skipped-target-reference-missing",
+        "image_quality_richness": "pass",
+        "layout_geometry_spacing": "pass",
+        "strict_target_required_mode": "fails-until-target-reference-exists",
+        "authorized_signature_rendered": "pass"
+    },
+    "completion_rule": "Do not mark the objective complete until target_pixel_identity passes via ./scripts/verify-invoice-visual.sh --regenerate --require-target against a correct target reference, or the objective is explicitly rescoped away from pixel-perfect identity."
+}

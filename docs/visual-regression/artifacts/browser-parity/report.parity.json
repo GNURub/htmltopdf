@@ -1,0 +1,745 @@
+{
+  "html": "examples/report.html",
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.pdf",
+  "browser_pdf": "docs/visual-regression/artifacts/browser-parity/report.chromium.pdf",
+  "htmlpdf_page_count": 42,
+  "browser_page_count": 42,
+  "pages_mode": "all",
+  "pages_compared": 42,
+  "page_count_delta": 0,
+  "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.png",
+  "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.png",
+  "diff_png": "docs/visual-regression/artifacts/browser-parity/report.diff.png",
+  "htmlpdf_size": [
+    1240,
+    1755
+  ],
+  "browser_size": [
+    1240,
+    1754
+  ],
+  "browser_raster_was_resized_for_metric": true,
+  "rmse_absolute": 8774.24,
+  "rmse_normalized": 0.133886,
+  "mean_rmse_normalized": 0.08785029761904763,
+  "max_rmse_normalized": 0.133886,
+  "max_rmse_page": 1,
+  "page_metrics": [
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 8774.24,
+      "rmse_normalized": 0.133886,
+      "page": 1
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p2.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p2.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p2.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 7072.08,
+      "rmse_normalized": 0.107913,
+      "page": 2
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p3.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p3.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p3.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 6726.6,
+      "rmse_normalized": 0.102641,
+      "page": 3
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p4.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p4.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p4.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 6257.26,
+      "rmse_normalized": 0.0954797,
+      "page": 4
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p5.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p5.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p5.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5706.37,
+      "rmse_normalized": 0.0870737,
+      "page": 5
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p6.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p6.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p6.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5719.49,
+      "rmse_normalized": 0.0872738,
+      "page": 6
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p7.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p7.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p7.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5690.17,
+      "rmse_normalized": 0.0868264,
+      "page": 7
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p8.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p8.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p8.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5641.96,
+      "rmse_normalized": 0.0860907,
+      "page": 8
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p9.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p9.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p9.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5726.97,
+      "rmse_normalized": 0.0873879,
+      "page": 9
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p10.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p10.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p10.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5719.4,
+      "rmse_normalized": 0.0872724,
+      "page": 10
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p11.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p11.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p11.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5731.16,
+      "rmse_normalized": 0.0874519,
+      "page": 11
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p12.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p12.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p12.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5697.89,
+      "rmse_normalized": 0.0869443,
+      "page": 12
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p13.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p13.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p13.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5594.29,
+      "rmse_normalized": 0.0853634,
+      "page": 13
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p14.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p14.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p14.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5463.07,
+      "rmse_normalized": 0.0833612,
+      "page": 14
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p15.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p15.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p15.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5515.26,
+      "rmse_normalized": 0.0841574,
+      "page": 15
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p16.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p16.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p16.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5529.85,
+      "rmse_normalized": 0.0843802,
+      "page": 16
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p17.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p17.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p17.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5539.8,
+      "rmse_normalized": 0.0845319,
+      "page": 17
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p18.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p18.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p18.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5545.57,
+      "rmse_normalized": 0.0846199,
+      "page": 18
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p19.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p19.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p19.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5533.57,
+      "rmse_normalized": 0.0844369,
+      "page": 19
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p20.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p20.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p20.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5532.49,
+      "rmse_normalized": 0.0844203,
+      "page": 20
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p21.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p21.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p21.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5478.36,
+      "rmse_normalized": 0.0835944,
+      "page": 21
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p22.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p22.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p22.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5566.67,
+      "rmse_normalized": 0.0849419,
+      "page": 22
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p23.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p23.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p23.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5566.67,
+      "rmse_normalized": 0.084942,
+      "page": 23
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p24.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p24.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p24.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5624.32,
+      "rmse_normalized": 0.0858217,
+      "page": 24
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p25.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p25.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p25.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5648.42,
+      "rmse_normalized": 0.0861894,
+      "page": 25
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p26.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p26.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p26.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5565.15,
+      "rmse_normalized": 0.0849187,
+      "page": 26
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p27.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p27.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p27.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5636.51,
+      "rmse_normalized": 0.0860076,
+      "page": 27
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p28.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p28.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p28.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5651.58,
+      "rmse_normalized": 0.0862376,
+      "page": 28
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p29.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p29.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p29.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5662.15,
+      "rmse_normalized": 0.0863989,
+      "page": 29
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p30.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p30.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p30.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5667.56,
+      "rmse_normalized": 0.0864815,
+      "page": 30
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p31.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p31.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p31.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5653.71,
+      "rmse_normalized": 0.08627,
+      "page": 31
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p32.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p32.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p32.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5654.5,
+      "rmse_normalized": 0.0862822,
+      "page": 32
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p33.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p33.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p33.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5599.81,
+      "rmse_normalized": 0.0854477,
+      "page": 33
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p34.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p34.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p34.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5687.65,
+      "rmse_normalized": 0.0867881,
+      "page": 34
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p35.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p35.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p35.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5688.89,
+      "rmse_normalized": 0.0868069,
+      "page": 35
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p36.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p36.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p36.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5710.51,
+      "rmse_normalized": 0.0871368,
+      "page": 36
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p37.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p37.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p37.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5696.29,
+      "rmse_normalized": 0.0869198,
+      "page": 37
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p38.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p38.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p38.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5633.27,
+      "rmse_normalized": 0.0859582,
+      "page": 38
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p39.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p39.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p39.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5683.86,
+      "rmse_normalized": 0.0867301,
+      "page": 39
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p40.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p40.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p40.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5698.81,
+      "rmse_normalized": 0.0869583,
+      "page": 40
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p41.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p41.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p41.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 5709.29,
+      "rmse_normalized": 0.0871182,
+      "page": 41
+    },
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/report.htmlpdf.p42.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/report.chromium.p42.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/report.p42.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1240,
+        1754
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 4603.87,
+      "rmse_normalized": 0.0702505,
+      "page": 42
+    }
+  ],
+  "threshold_rmse_normalized": null,
+  "passed_threshold": null
+}

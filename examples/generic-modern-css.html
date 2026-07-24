@@ -1,0 +1,784 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic modern CSS fixture</title>
+  <style>
+    /* Build-tool comments should be ignored without breaking the next selector. */
+    :root {
+      --brand: rgb(37 99 235);
+      --surface: rgb(239 246 255);
+      --ink: rgb(15, 23, 42);
+      --accent: oklch(70.7% .165 254.624);
+      --muted: rgba(71, 85, 105, 0.92);
+      --wash: color-mix(in srgb, var(--brand), transparent 92%);
+      --fallback-brand: var(--missing-brand, var(--brand));
+      --media-ratio: 16 / 9;
+      --viewport-rhythm: 1vmin;
+      --radius: 1rem;
+      --space: 1.5rem;
+    }
+    .modern-card {
+      position: relative;
+      margin: var(--space) 3rem;
+      padding-block: var(--space);
+      padding-inline: calc(1rem + 0.5rem);
+      inline-size: min(100%, 42rem);
+      min-block-size: clamp(9rem, calc(7rem + 6rem), 14rem);
+      background:
+        radial-gradient(circle at 12% 8%, rgb(37 99 235 / 14%), transparent 30%),
+        linear-gradient(135deg, var(--surface) 0%, rgb(219 234 254) 52%, rgb(255 255 255) 100%);
+      border: 2px solid var(--fallback-brand);
+      border-inline-start: 0.4rem solid hsl(199 89% 48%);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow:
+        0 1rem 2rem rgba(15, 23, 42, 0.16),
+        0 0.25rem 0.75rem rgb(37 99 235 / 8%);
+      color: var(--ink) !important;
+
+      & .nested-badge {
+        color: rgb(30 64 175);
+        border-bottom: 1px solid color-mix(in srgb, var(--brand), transparent 70%);
+      }
+    }
+    .modern-card h1 {
+      color: var(--brand);
+      font-size: clamp(1.6rem, 2rem, 2.4rem);
+    }
+    .case-function-modern {
+      color: VAR(--brand);
+    }
+    .absolute-badge {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      width: 7rem;
+      padding: 0.35rem 0.5rem;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, 0.12);
+      color: rgb(30 64 175);
+      text-align: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .modern-card p {
+      color: var(--muted);
+      line-height: 1.45rem;
+    }
+    .pill-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .pill {
+      padding: calc(0.5rem + 0.25rem) 1rem;
+      background: rgb(255 255 255);
+      border: 1px solid rgb(191 219 254);
+      border-radius: 0.75rem;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .wash {
+      background: var(--wash);
+      border-color: #2563eb33;
+    }
+    @supports (color: color-mix(in srgb, red, transparent)) {
+      .supports-enhanced {
+        color: color-mix(in srgb, var(--brand), transparent 12%);
+        border-left-color: color-mix(in lab, lab(62% 18 -28) 30%, white);
+      }
+    }
+    @supports ((-webkit-hyphens: none) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color: rgb(from red r g b)))) {
+      .supports-not-modern {
+        color: rgb(37 99 235);
+      }
+    }
+    @property --registered-alpha {
+      syntax: "<percentage>";
+      inherits: false;
+      initial-value: 72%;
+    }
+    @layer components {
+      .layered {
+        border-bottom: 2px solid #2563eb33;
+      }
+    }
+    .layer-cascade-modern {
+      color: rgb(37 99 235);
+    }
+    @layer utilities {
+      .layer-cascade-modern {
+        color: rgb(220 38 38);
+      }
+    }
+    @layer reset, components;
+    @layer components {
+      .named-layer-modern {
+        color: rgb(37 99 235);
+      }
+    }
+    @layer reset {
+      .named-layer-modern {
+        color: rgb(220 38 38);
+      }
+      .important-layer-modern {
+        color: rgb(37 99 235) !important;
+      }
+    }
+    @layer components {
+      .important-layer-modern {
+        color: rgb(220 38 38) !important;
+      }
+    }
+    .important-layer-modern {
+      color: rgb(15 23 42) !important;
+    }
+    .breakable {
+      max-inline-size: 60ch;
+      overflow-wrap: anywhere;
+    }
+    .ellipsis-modern {
+      inline-size: 12rem;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      padding: 0.35rem 0.5rem;
+      border: 1px solid rgb(191 219 254);
+      border-radius: 999px;
+    }
+    .faded {
+      opacity: 0.72;
+    }
+    .registered-property-modern {
+      opacity: var(--registered-alpha);
+    }
+    .scoped-vars {
+      --local-pill: var(--missing-pill, hsl(199 89% 48%));
+      color: var(--local-pill);
+    }
+    .flex-modern {
+      display: flex;
+      justify-content: space-evenly;
+      align-items: baseline;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+      padding: 0.75rem;
+      border-radius: 0.75rem;
+      background: rgb(255 255 255 / 80%);
+    }
+    .flex-modern strong {
+      font-size: 1.5rem;
+      letter-spacing: -0.03em;
+    }
+    .flex-modern small {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .flex-shorthand-modern {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding: 0.5rem;
+      border: 1px solid rgb(191 219 254);
+      border-radius: 0.75rem;
+    }
+    .flex-shorthand-modern .fill {
+      flex: 1 1 0;
+      background: rgb(219 234 254);
+      border-radius: 0.5rem;
+      padding: 0.4rem;
+    }
+    .flex-shorthand-modern .fixed {
+      flex: 0 0 8rem;
+      background: rgb(255 255 255 / 85%);
+      border-radius: 0.5rem;
+      padding: 0.4rem;
+    }
+    .flex-flow-modern {
+      display: flex;
+      flex-flow: row wrap;
+      align-items: flex-start;
+      width: 20rem;
+      inline-size: 20rem;
+      gap: 0.4rem 0.6rem;
+      margin-top: 1rem;
+      max-block-size: 12rem;
+    }
+    .flow-pill {
+      flex: 0 0 12rem;
+      padding: 0.35rem 0.5rem;
+      background: rgb(240 249 255);
+      border: 1px solid rgb(186 230 253);
+      border-radius: 999px;
+    }
+    .flow-pill.priority {
+      order: -1;
+      align-self: flex-end;
+    }
+    .current-color {
+      color: rgb(124 58 237);
+      border: 2px solid currentColor;
+      background-color: rgb(255 255 255 / 80%);
+    }
+    .grid-modern {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      place-items: center start;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    .grid-span-modern {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    .grid-span-modern span {
+      padding: 0.4rem;
+      border-radius: 0.5rem;
+      background: rgb(219 234 254);
+    }
+    .grid-span-modern .span-two {
+      grid-column: span 2 / span 2;
+    }
+    .grid-span-modern .full {
+      grid-column: 1 / -1;
+      background: rgb(240 249 255);
+    }
+    .font-shorthand-modern {
+      font: italic 650 1rem/1.5 Georgia, serif;
+      color: oklab(52% 0.03 -0.1 / 90%);
+      background-color: lch(96% 8 260deg / 60%);
+      border-bottom: 2px solid lab(62% 18 -28 / 70%);
+    }
+    .font-style-modern {
+      font-style: oblique 12deg;
+    }
+    .numeric-feature-modern {
+      font-variant-numeric: lining-nums tabular-nums;
+      font-feature-settings: "kern" 1, "tnum" 1;
+    }
+    .text-decoration-modern {
+      text-decoration: underline line-through;
+      text-decoration-color: color-mix(in srgb, var(--brand), transparent 15%);
+      text-decoration-thickness: 0.12em;
+      text-underline-offset: 0.18em;
+    }
+    .border-longhand-modern {
+      border-style: solid;
+      border-block-width: 2px 4px;
+      border-inline-width: 6px 8px;
+      border-block-color: rebeccapurple skyblue;
+      border-inline-color: tomato gold;
+      border-radius: 12px 4px / 6px 2px;
+    }
+    .outline-modern {
+      outline: 4px dashed currentColor;
+      outline-offset: 3px;
+      color: rgb(37 99 235);
+      cursor: default;
+      user-select: none;
+      pointer-events: none;
+      transition: color 120ms ease;
+      animation: none;
+      will-change: transform;
+      appearance: none;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      text-rendering: geometricPrecision;
+      font-kerning: normal;
+      font-optical-sizing: auto;
+      font-synthesis: none;
+      color-scheme: light;
+      print-color-adjust: exact;
+      container-type: inline-size;
+      overscroll-behavior: contain;
+      scroll-behavior: smooth;
+      accent-color: currentColor;
+      caret-color: currentColor;
+      resize: none;
+    }
+    .all-initial-modern {
+      all: initial;
+      display: block;
+      padding: 0.75rem 1rem;
+      border: 1px solid rgb(191 219 254);
+      border-radius: 0.75rem;
+      color: var(--brand);
+      font: normal 500 0.9rem/1.5 Arial, sans-serif;
+      background: rgb(255 255 255 / 80%);
+    }
+    .clip-hidden-modern {
+      position: absolute;
+      clip: rect(0 0 0 0);
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: hidden;
+    }
+    .list-none-modern {
+      list-style: none;
+      list-style-type: none;
+    }
+
+    .z-index-modern {
+      position: relative;
+      min-block-size: 4rem;
+      margin-top: 1rem;
+      isolation: isolate;
+    }
+    .z-index-modern .layer {
+      position: absolute;
+      top: 0.2rem;
+      inline-size: 3rem;
+      block-size: 3rem;
+      border-radius: 999px;
+    }
+    .z-index-modern .layer-back {
+      left: 0;
+      z-index: 1;
+      background: rgb(37 99 235 / 35%);
+    }
+    .z-index-modern .layer-front {
+      left: 1.4rem;
+      z-index: 2;
+      background: rgb(220 38 38 / 45%);
+    }
+    .z-index-modern .layer-label {
+      position: relative;
+      z-index: 3;
+      display: block;
+      padding-left: 5rem;
+      padding-top: 0.85rem;
+    }
+    .transform-modern {
+      translate: 0.25rem -0.15rem;
+      scale: 98%;
+      rotate: 0.01turn;
+      transform-origin: left top;
+      transform: translateX(0.4rem) translateY(-0.2rem) scale(0.98, 1.02) rotate(2deg);
+    }
+    .aspect-ratio-modern {
+      aspect-ratio: var(--media-ratio);
+      inline-size: 12rem;
+      background: linear-gradient(90deg, rgb(219 234 254), rgb(255 255 255));
+      border: 1px solid rgb(147 197 253);
+      border-radius: 0.75rem;
+    }
+    .em-modern {
+      font-size: 1.25rem;
+      padding: 0.75em 1em;
+      margin-block-start: 1em;
+      border: 0.1em solid rgb(191 219 254);
+      border-radius: 0.6em;
+    }
+    .background-shorthand-modern {
+      min-block-size: 4rem;
+      background: url("assets/generic-photo.jpg") right bottom / cover no-repeat #eff6ff;
+      background-clip: padding-box;
+      color: rgb(255 255 255);
+      text-shadow: 0 1px 2px rgb(15 23 42 / 70%);
+    }
+    .table-align-modern {
+      inline-size: 100%;
+      border-collapse: collapse;
+      border-spacing: 0.25rem 0.5rem;
+    }
+    .table-align-modern td {
+      padding: 0.4rem 0.5rem;
+      border: 1px solid rgb(191 219 254);
+    }
+    .table-align-modern .middle {
+      vertical-align: middle;
+    }
+
+    .viewport-units-modern {
+      inline-size: min(40vw, 18rem);
+      min-block-size: max(8dvh, 4rem);
+      padding: calc(var(--viewport-rhythm) + 0.25rem) 2vmax;
+      margin-block-start: 1svh;
+      background: linear-gradient(135deg, rgb(240 249 255), rgb(255 255 255));
+      border: 1px dashed color-mix(in srgb, var(--brand), transparent 55%);
+      border-radius: 0.75rem;
+    }
+    .env-units-modern {
+      padding-inline: calc(env(safe-area-inset-left, 2px) + 1rem);
+      padding-block-start: env(safe-area-inset-top, 0.5rem);
+      margin-block-start: env(safe-area-inset-bottom);
+      border: 1px solid rgb(191 219 254);
+      border-radius: 0.75rem;
+      background: rgb(255 255 255 / 82%);
+    }
+    .line-height-units-modern {
+      font-size: 1rem;
+      line-height: 1.5;
+      padding-block: 1lh;
+      margin-block-start: 0.5rlh;
+      inline-size: calc(10lh + 2rlh);
+      border: 1px solid rgb(191 219 254);
+    }
+    .font-logical-units-modern {
+      container-type: inline-size;
+      font-size: 1rem;
+      padding-inline: 2ex 1cap;
+      padding-block-start: calc(2cqi + 0.25rem);
+      block-size: 3ic;
+      inline-size: calc(12vi + 2vb + 3cap);
+      max-inline-size: min(50cqw, 24rem);
+      min-block-size: max(8cqh, 3ic);
+      margin-block-start: 1svi;
+      margin-block-end: calc(1cqmin + 0.25rem);
+      text-wrap: pretty;
+      text-wrap-mode: wrap;
+      text-wrap-style: balance;
+      white-space-collapse: collapse;
+      word-spacing: 0.18em;
+      color: rgb(from oklch(42% 0.11 252 / 92%) r g b / alpha);
+      border: 1px solid rgb(from color(display-p3 0.55 0.7 1) r g b / 38%);
+      box-shadow: 0 0 0 2px hwb(218 15% 12% / 18%);
+      background: color(display-p3 0.97 0.985 1 / 84%);
+    }
+    :is(.unused-selector, .functional-selector) {
+      background: rgb(238 242 255 / 86%);
+      border: 1px solid rgb(199 210 254);
+    }
+    .modern-card :where(.missing-selector, .selector-modern) {
+      color: rgb(67 56 202);
+      border-radius: 0.75rem;
+      padding: 0.6rem 0.75rem;
+    }
+    .selector-modern[data-state="browser-match" i] {
+      border-left: 0.35rem solid rgb(37 99 235);
+    }
+    .selector-modern[data-flags~="READY" i] {
+      border-right: 0.35rem solid rgb(14 165 233);
+    }
+    .modern-card :not(.legacy-shell .complex-not-modern, .complex-not-modern.excluded) {
+      box-shadow: inset 0 0 0 2px rgb(37 99 235 / 20%);
+    }
+    .complex-not-modern {
+      margin-block-start: 0.5rem;
+      padding: 0.55rem 0.75rem;
+      border-radius: 0.75rem;
+      background: rgb(239 246 255 / 74%);
+    }
+    .filtered-nth-modern {
+      margin: 0.5rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 0.35rem;
+    }
+    .filtered-nth-modern > li {
+      padding: 0.45rem 0.65rem;
+      border-radius: 0.65rem;
+      background: rgb(248 250 252);
+    }
+    .filtered-nth-modern > li:nth-child(even of .visible-row) {
+      background: rgb(219 234 254);
+      color: rgb(30 64 175);
+      font-weight: 700;
+    }
+    .language-dir-modern {
+      margin-block-start: 0.5rem;
+      padding: 0.65rem 0.75rem;
+      border-radius: 0.8rem;
+      background: rgb(255 255 255 / 80%);
+      border: 1px solid rgb(226 232 240);
+    }
+    .language-dir-modern:lang(es) {
+      border-left: 0.35rem solid rgb(37 99 235);
+      color: rgb(30 64 175);
+    }
+    .language-dir-modern .rtl-chip:dir(rtl) {
+      display: inline-block;
+      margin-inline-start: 0.5rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 999px;
+      background: rgb(219 234 254);
+      font-weight: 700;
+    }
+    .language-dir-modern .ltr-chip:dir(ltr) {
+      display: inline-block;
+      margin-inline-start: 0.5rem;
+      padding: 0.2rem 0.45rem;
+      border-radius: 999px;
+      background: rgb(240 249 255);
+      color: rgb(14 116 144);
+      font-weight: 700;
+    }
+    .form-state-modern {
+      display: grid;
+      gap: 0.35rem;
+      padding: 0.75rem;
+      border: 1px solid rgb(191 219 254);
+      border-radius: 0.75rem;
+      background: rgb(255 255 255 / 78%);
+    }
+    .form-state-modern input:disabled + .disabled-label,
+    .form-state-modern input:enabled + .enabled-label,
+    .form-state-modern input:checked + .checked-label,
+    .form-state-modern input:default + .default-label,
+    .form-state-modern option:default,
+    .form-state-modern input:required + .required-label,
+    .form-state-modern input:optional + .optional-label,
+    .form-state-modern input:placeholder-shown + .placeholder-label,
+    .form-state-modern input:read-only + .readonly-label,
+    .form-state-modern a:any-link,
+    .form-state-modern .empty-chip:empty {
+      color: rgb(37 99 235);
+      border-inline-start: 0.25rem solid currentColor;
+      padding-inline-start: 0.35rem;
+    }
+    .form-state-modern input:hover + .dynamic-label,
+    .form-state-modern input:focus + .dynamic-label,
+    .form-state-modern input:focus-visible + .dynamic-label,
+    .form-state-modern input:active + .dynamic-label {
+      color: rgb(220 38 38);
+      background: rgb(254 226 226);
+    }
+    .form-state-modern input::-webkit-slider-thumb {
+      background: rgb(220 38 38);
+    }
+    .generated-modern::before {
+      content: "Generated before · ";
+      color: rgb(37 99 235);
+      font-weight: 700;
+    }
+    .generated-modern::after {
+      content: " · generated after";
+      color: rgb(220 38 38);
+      font-weight: 700;
+    }
+    .pseudo-box-modern {
+      position: relative;
+      min-block-size: 3rem;
+      padding: 1rem 1.25rem;
+      background: rgb(255 255 255 / 78%);
+      border-radius: 0.9rem;
+    }
+    .pseudo-box-modern::before {
+      content: "";
+      display: block;
+      inline-size: 3rem;
+      block-size: 0.35rem;
+      margin-block-end: 0.65rem;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgb(37 99 235), rgb(14 165 233));
+    }
+    .pseudo-box-modern::after {
+      content: "";
+      position: absolute;
+      inset-block-start: 0.7rem;
+      inset-inline-end: 0.85rem;
+      inline-size: 1.6rem;
+      block-size: 1.6rem;
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, rgb(255 255 255 / 90%), rgb(37 99 235 / 34%) 72%);
+      box-shadow: 0 0.45rem 1rem rgb(37 99 235 / 20%);
+    }
+    .modern-card:has(.selector-modern) {
+      border-bottom: 0.35rem solid light-dark(rgb(37 99 235), rgb(15 23 42));
+    }
+    @scope (.scoped-region) {
+      .scoped-target {
+        color: rgb(37 99 235);
+        border: 1px solid rgb(191 219 254);
+      }
+    }
+    @media (width >= 30rem) {
+      .range-query {
+        background: rgb(239 246 255);
+      }
+    }
+    @media ((prefers-color-scheme: dark) or (width >= 30rem)) {
+      .or-query {
+        border-top: 0.2rem solid rgb(37 99 235);
+      }
+    }
+    @media (orientation: portrait) and (prefers-color-scheme: light) and (prefers-reduced-motion: no-preference) {
+      .media-preference-modern {
+        border-color: rgb(37 99 235);
+        background: rgb(239 246 255);
+      }
+    }
+    @media (hover: none) and (pointer: none) and (update: none) and (color-gamut: srgb) {
+      .media-interaction-modern {
+        border-color: rgb(37 99 235);
+        background: rgb(239 246 255);
+      }
+    }
+    @media (prefers-color-scheme: dark), (orientation: landscape), (prefers-reduced-motion: reduce) {
+      .media-preference-modern {
+        color: rgb(220 38 38);
+      }
+    }
+    @MEDIA print {
+      .uppercase-at-rule-modern {
+        border-left: 2px solid rgb(37 99 235);
+      }
+    }
+    @container (min-width: 20rem) {
+      .container-enhanced {
+        background: color-mix(in srgb, var(--brand), transparent 90%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="modern-card">
+    <div class="absolute-badge">absolute</div>
+    <h1>Modern CSS basics</h1>
+    <p>CSS variables, var() fallbacks, rem units, rgb() and rgba() colors should resolve in the generic renderer.</p>
+    <section class="pill-row">
+      <div class="pill">var(--brand)</div>
+      <div class="pill wash supports-enhanced nested-badge scoped-vars">1rem spacing</div>
+      <div class="pill breakable layered faded container-enhanced">rgb-hsl-logical-props</div>
+    </section>
+    <section class="flex-modern">
+      <small>baseline</small>
+      <strong>Modern flex</strong>
+      <span class="current-color">space-evenly</span>
+    </section>
+    <section class="flex-shorthand-modern">
+      <span class="fill">flex: 1 1 0</span>
+      <span class="fixed">flex-basis: 8rem</span>
+    </section>
+    <section class="flex-flow-modern">
+      <span class="flow-pill">flex-flow row wrap</span>
+      <span class="flow-pill priority">ordered + align-self</span>
+      <span class="flow-pill">wrapped item</span>
+      <span class="flow-pill">wrapped item</span>
+      <span class="flow-pill">wrapped item</span>
+      <span class="flow-pill">wrapped item</span>
+      <span class="flow-pill">wrapped item</span>
+    </section>
+    <section class="grid-modern">
+      <strong>Grid</strong>
+      <span>place-items center start</span>
+    </section>
+    <section class="grid-span-modern">
+      <span class="span-two">grid-column span 2</span>
+      <span>auto</span>
+      <span>auto</span>
+      <span class="full">grid-column 1 / -1</span>
+    </section>
+    <section class="font-shorthand-modern border-longhand-modern">
+      Font shorthand, named colors, oklab(), border side longhands, and two-axis border-radius should parse.
+    </section>
+    <section class="font-style-modern">
+      font-style oblique should paint a slanted text run without affecting layout width.
+    </section>
+    <section class="numeric-feature-modern">
+      Numeric OpenType features should parse: 1234567890 / 000111222.
+    </section>
+    <section class="text-decoration-modern">
+      text-decoration underline/line-through, color, thickness, and underline offset should paint browser-like text decoration lines.
+    </section>
+    <section class="layer-cascade-modern">
+      Unlayered declarations should outrank later normal @layer declarations.
+    </section>
+    <section class="named-layer-modern">
+      Named cascade-layer order should outrank source order for browser-like framework CSS.
+    </section>
+    <section class="important-layer-modern">
+      Important layered declarations should reverse named layer order before unlayered important declarations.
+    </section>
+    <section class="case-function-modern uppercase-at-rule-modern">
+      CSS function and at-rule names should be accepted case-insensitively.
+    </section>
+    <section class="supports-not-modern registered-property-modern">
+      @supports boolean logic and @property initial-value should work for modern framework output.
+    </section>
+    <section class="outline-modern">
+      outline shorthand and outline-offset should paint outside the box without changing layout.
+    </section>
+    <section class="all-initial-modern">
+      all: initial should reset inherited/UA style before later declarations rebuild the box.
+    </section>
+    <section class="z-index-modern">
+      <span class="layer layer-back"></span>
+      <span class="layer layer-front"></span>
+      <span class="layer-label">z-index should order positioned sibling layers deterministically.</span>
+    </section>
+    <section class="pill transform-modern">
+      Individual transform properties and transform lists should parse.
+    </section>
+    <section class="aspect-ratio-modern">
+      Aspect-ratio should provide a browser-like preferred height for auto-sized boxes.
+    </section>
+    <section class="em-modern background-shorthand-modern">
+      em units should resolve from the current font size and background shorthand should carry URL, position, and size.
+    </section>
+    <table class="table-align-modern">
+      <tr>
+        <td>Table cells<br>can be taller</td>
+        <td class="middle">vertical-align: middle</td>
+      </tr>
+    </table>
+    <section class="viewport-units-modern env-units-modern">
+      env() safe-area variables should resolve length fallbacks in static print, including inside calc().
+    </section>
+    <section class="line-height-units-modern">
+      lh and rlh units should resolve from element and root line-height contexts.
+    </section>
+    <section class="font-logical-units-modern">
+      ex, cap, ic, vi, vb, svi, lvb, cqw, cqh, cqi, cqb, cqmin, cqmax, text-wrap, text-wrap-mode, text-wrap-style, white-space-collapse, word-spacing, rgb(from ...), hwb(...), and color(display-p3 ...) should resolve for modern responsive print CSS.
+    </section>
+    <section class="selector-modern functional-selector" data-state="Browser-Match" data-flags="modern ready">
+      :is(), :where(), and ASCII case-insensitive attribute selector flags should match browser CSS.
+    </section>
+    <section class="complex-not-modern">
+      Complex :not() selector lists should support modern framework exclusion rules.
+    </section>
+    <ul class="filtered-nth-modern">
+      <li class="visible-row">First visible row</li>
+      <li class="hidden-row">Hidden framework row skipped by selector filter</li>
+      <li class="visible-row">Second visible row should be highlighted by nth-child(of selector)</li>
+    </ul>
+    <section class="language-dir-modern" lang="es-ES">
+      :lang(es) should match inherited language subtags.
+      <span class="rtl-chip" dir="rtl">:dir(rtl)</span>
+      <span class="ltr-chip" dir="ltr">:dir(ltr)</span>
+    </section>
+    <section class="form-state-modern">
+      <input disabled><span class="disabled-label">:disabled should match static disabled controls.</span>
+      <input><span class="enabled-label">:enabled should match enabled controls.</span>
+      <input type="checkbox" checked><span class="checked-label">:checked should match checked controls.</span>
+      <input type="radio" checked><span class="default-label">:default should match initially checked radio/checkbox controls.</span>
+      <select><option selected>:default should match initially selected options.</option></select>
+      <input required><span class="required-label">:required should match required controls.</span>
+      <input><span class="optional-label">:optional should match optional controls.</span>
+      <input placeholder="Buscar"><span class="placeholder-label">:placeholder-shown should match empty placeholder controls.</span>
+      <input readonly><span class="readonly-label">:read-only should match readonly controls.</span>
+      <input><span class="dynamic-label">:hover/:focus/:active must not be faked in static PDF output.</span>
+      <a href="#modern-state">:any-link should match static anchors with href.</a>
+      <span class="empty-chip"></span>
+    </section>
+    <section class="ellipsis-modern">
+      text-overflow ellipsis should truncate long single-line labels generically.
+    </section>
+    <section class="generated-modern">
+      pseudo-element content should render without leaking styles onto the real element.
+    </section>
+    <section class="pseudo-box-modern">
+      empty generated pseudo-elements should paint modern decorative boxes and overlays.
+    </section>
+    <section class="scoped-region range-query or-query">
+      <span class="scoped-target">Scoped CSS, :has(), light-dark(), and media range syntax should be generic too.</span>
+    </section>
+    <section class="media-preference-modern">
+      Static print media should prefer light color scheme, portrait orientation, and no-preference motion.
+    </section>
+    <section class="media-interaction-modern">
+      Static PDF media should expose no hover, no pointer, no update loop, and sRGB color gamut.
+    </section>
+  </main>
+</body>
+</html>

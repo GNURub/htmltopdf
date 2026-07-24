@@ -1,0 +1,21 @@
+{
+  "html": "examples/generic-hidden-content.html",
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/generic-hidden-content.htmlpdf.pdf",
+  "browser_pdf": "docs/visual-regression/artifacts/browser-parity/generic-hidden-content.chromium.pdf",
+  "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/generic-hidden-content.htmlpdf.png",
+  "browser_png": "docs/visual-regression/artifacts/browser-parity/generic-hidden-content.chromium.png",
+  "diff_png": "docs/visual-regression/artifacts/browser-parity/generic-hidden-content.diff.png",
+  "htmlpdf_size": [
+    1240,
+    1755
+  ],
+  "browser_size": [
+    1275,
+    1650
+  ],
+  "browser_raster_was_resized_for_metric": true,
+  "rmse_absolute": 3827.1,
+  "rmse_normalized": 0.0583978,
+  "threshold_rmse_normalized": null,
+  "passed_threshold": null
+}

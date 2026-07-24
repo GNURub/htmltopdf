@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic print page fixture</title>
+  <style>
+    @page { size: A4; margin: 25mm 20mm; }
+    body { margin: 0; color: #111827; }
+    .no-print { display: block; background: #111827; color: white; padding: 1rem; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-card { padding: 1rem; border: 1px solid #93c5fd; background: #eff6ff; }
+      .keep-together { page-break-inside: avoid; break-inside: avoid; }
+      h2 { page-break-after: avoid; break-after: avoid; }
+      .next-page { page-break-before: always; }
+    }
+    @media (max-width: 768px) {
+      .responsive-print { border-left: 0.4rem solid #2563eb; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print">This toolbar must not appear in print output.</div>
+  <section class="print-card responsive-print">
+    <h1>Print page CSS</h1>
+    <p>@page margins and print-only rules should affect the generated PDF.</p>
+  </section>
+  <section class="print-card keep-together next-page">
+    <h2>Keep together</h2>
+    <p>page-break-inside: avoid should move blocks instead of splitting them when the block fits on a fresh page.</p>
+  </section>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic framework selector fixture</title>
+  <style>
+    .framework-card[data-v-demo] {
+      display: flex;
+      flex-direction: column;
+      margin: 2rem;
+      padding: 1rem;
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      border-radius: 0.75rem;
+    }
+    .framework-card[data-v-demo] h1:first-child {
+      color: #1d4ed8;
+      font-size: 1.75rem;
+      line-height: 1.15;
+    }
+    .framework-card[data-v-demo] > .item[data-v-demo] {
+      padding: 0.75rem;
+      background: #ffffff;
+      border: 1px solid #bfdbfe;
+      border-radius: 0.5rem;
+    }
+    .metric-grid[data-v-demo] {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    :where(.framework-card) :is(.item) {
+      color: #0f172a;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:last-child {
+      color: #1d4ed8;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:not(:last-child) {
+      border-bottom: 2px solid #93c5fd;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:nth-child(2) {
+      border-color: #2563eb;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:nth-child(2n + 1) {
+      outline: 1px solid #bfdbfe;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:nth-last-child(2) {
+      border-top: 2px solid #60a5fa;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:first-of-type {
+      border-left-color: #1d4ed8;
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:nth-of-type(2n) {
+      box-shadow: 0 4px 10px rgb(37 99 235 / 12%);
+    }
+    .metric-grid[data-v-demo] > .item[data-v-demo]:last-of-type {
+      border-right-color: #1d4ed8;
+    }
+    .metric-grid[data-v-demo] > [data-state="active"] {
+      font-weight: 700;
+    }
+    .metric-grid[data-v-demo] > .item:not([data-muted]) {
+      background: #f8fafc;
+    }
+    .combinator-row .anchor + .adjacent {
+      color: #16a34a;
+      font-weight: 700;
+    }
+    .combinator-row .anchor ~ .later {
+      border-color: #16a34a;
+      background: #f0fdf4;
+    }
+    .combinator-row .anchor:has(+ .adjacent) {
+      outline: 2px solid #16a34a;
+    }
+    .combinator-row:has(> .later) {
+      border-top: 2px solid #16a34a;
+      padding-top: 0.5rem;
+    }
+    .calc-leading {
+      line-height: calc(1.25 / .875);
+    }
+  </style>
+</head>
+<body>
+  <section class="framework-card" data-v-demo>
+    <h1>Framework selectors</h1>
+    <div class="item" data-v-demo>Attribute selectors, :where(), :is(), and pseudo-classes are tolerated.</div>
+    <div class="metric-grid" data-v-demo>
+      <div class="item" data-v-demo>One</div>
+      <div class="item calc-leading" data-v-demo data-state="active">Two</div>
+      <div class="item" data-v-demo data-muted>Three</div>
+      <div class="item" data-v-demo>Four</div>
+    </div>
+    <div class="metric-grid combinator-row" data-v-demo>
+      <div class="item anchor" data-v-demo>Anchor</div>
+      <div class="item adjacent" data-v-demo>Adjacent sibling</div>
+      <div class="item later" data-v-demo>General sibling</div>
+    </div>
+  </section>
+</body>
+</html>

@@ -1,0 +1,7 @@
+- main [ref=e2]:
+  - paragraph [ref=e3]: GENERIC HTML FIXTURE
+  - heading "Cards, padding and rounded backgrounds" [level=1] [ref=e4]
+  - paragraph [ref=e5]: This fixture must render through the generic pipeline, not through any invoice-specific compositor.
+  - generic [ref=e6]:
+    - heading "Nested section" [level=2] [ref=e7]
+    - paragraph [ref=e8]: Nested containers should indent text and paint their own background behind the content.

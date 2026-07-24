@@ -1,0 +1,17 @@
+[package]
+name = "htmlpdf-server"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "htmlpdf-server"
+path = "src/main.rs"
+
+[dependencies]
+htmlpdf-core = { path = "../htmlpdf-core" }
+
+[lints]
+workspace = true

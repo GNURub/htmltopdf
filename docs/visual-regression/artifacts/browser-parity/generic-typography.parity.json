@@ -1,0 +1,48 @@
+{
+  "html": "examples/generic-typography.html",
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/generic-typography.htmlpdf.pdf",
+  "browser_pdf": "docs/visual-regression/artifacts/browser-parity/generic-typography.chromium.pdf",
+  "htmlpdf_page_count": 1,
+  "browser_page_count": 1,
+  "pages_mode": "first",
+  "pages_compared": 1,
+  "page_count_delta": 0,
+  "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.htmlpdf.png",
+  "browser_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.chromium.png",
+  "diff_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.diff.png",
+  "htmlpdf_size": [
+    1240,
+    1755
+  ],
+  "browser_size": [
+    1275,
+    1650
+  ],
+  "browser_raster_was_resized_for_metric": true,
+  "rmse_absolute": 7295.07,
+  "rmse_normalized": 0.111316,
+  "mean_rmse_normalized": 0.111316,
+  "max_rmse_normalized": 0.111316,
+  "max_rmse_page": 1,
+  "page_metrics": [
+    {
+      "htmlpdf_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.htmlpdf.png",
+      "browser_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.chromium.png",
+      "diff_png": "docs/visual-regression/artifacts/browser-parity/generic-typography.diff.png",
+      "htmlpdf_size": [
+        1240,
+        1755
+      ],
+      "browser_size": [
+        1275,
+        1650
+      ],
+      "browser_raster_was_resized_for_metric": true,
+      "rmse_absolute": 7295.07,
+      "rmse_normalized": 0.111316,
+      "page": 1
+    }
+  ],
+  "threshold_rmse_normalized": null,
+  "passed_threshold": null
+}

@@ -1,0 +1,21 @@
+[workspace]
+members = [
+  "crates/htmlpdf-core",
+  "crates/htmlpdf-cli",
+  "crates/htmlpdf-server",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+authors = ["htmlpdf contributors"]
+repository = "https://example.invalid/htmlpdf"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

@@ -1,0 +1,27 @@
+{
+  "htmlpdf_pdf": "docs/visual-regression/artifacts/browser-parity/generic-modern-css.htmlpdf.pdf",
+  "chromium_pdf": "docs/visual-regression/artifacts/browser-parity/generic-modern-css.chromium.pdf",
+  "htmlpdf_page_count": 1,
+  "chromium_page_count": 1,
+  "page_count_delta": 0,
+  "mode": "layout",
+  "pages_compared": 1,
+  "mean_sequence_ratio": 1.0,
+  "min_sequence_ratio": 1.0,
+  "min_sequence_ratio_page": 1,
+  "threshold_ratio": null,
+  "passed_threshold": null,
+  "page_metrics": [
+    {
+      "page": 1,
+      "sequence_ratio": 1.0,
+      "token_jaccard": 1.0,
+      "htmlpdf_char_count": 328,
+      "chromium_char_count": 328,
+      "htmlpdf_token_count": 78,
+      "chromium_token_count": 78,
+      "htmlpdf_excerpt": "absolute modern css basics css variables, var() fallbacks, rem units, rgb() and rgba() colors should resolve in the generic renderer. var(--brand) 1rem spacing rgb-hsl-logical-props baseline modern flex space-evenly grid…",
+      "chromium_excerpt": "absolute modern css basics css variables, var() fallbacks, rem units, rgb() and rgba() colors should resolve in the generic renderer. var(--brand) 1rem spacing rgb-hsl-logical-props baseline modern flex space-evenly grid…"
+    }
+  ]
+}
