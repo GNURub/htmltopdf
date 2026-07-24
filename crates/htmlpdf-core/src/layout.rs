@@ -603,13 +603,17 @@ impl<'a> LayoutContext<'a> {
         base_left: f32,
         base_right: f32,
     ) -> Vec<FlowTextLine> {
-        let page_index = self.pages.len().saturating_sub(1);
-        let mut remaining = text.to_string();
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut remaining = normalize_text_for_flow(text, style.white_space);
         let mut y = self.current_y;
         let line_height = layout_line_height(style).max(0.01);
         let mut output = Vec::new();
 
         while !remaining.is_empty() {
+            if y < self.options.page.margin_bottom_pt + line_height {
+                page_index += 1;
+                y = self.options.page.height_pt - self.options.page.margin_top_pt;
+            }
             let occupied_left = self.float_occupied_width_at_y(page_index, y, FloatSide::Left);
             let occupied_right = self.float_occupied_width_at_y(page_index, y, FloatSide::Right);
             let inset_left = base_left + occupied_left;
@@ -632,35 +636,20 @@ impl<'a> LayoutContext<'a> {
             if wrapped.is_empty() {
                 break;
             }
-
-            let next_float_bottom = self
-                .floats
-                .iter()
-                .filter(|float| {
-                    !self.suppress_floats
-                        && float.page_index == page_index
-                        && float.bottom < y - 0.01
-                        && float.bottom > self.options.page.margin_bottom_pt
-                })
-                .map(|float| float.bottom)
-                .max_by(f32::total_cmp);
-            let lines_until_float = next_float_bottom
-                .map(|bottom| ((y - bottom) / line_height).ceil().max(1.0) as usize)
-                .unwrap_or(wrapped.len())
-                .min(wrapped.len());
-
-            for line in wrapped.iter().take(lines_until_float) {
-                output.push(FlowTextLine {
-                    text: line.clone(),
-                    inset_left,
-                    available_width,
-                });
-                y -= line_height;
-            }
-            if lines_until_float >= wrapped.len() {
+            output.push(FlowTextLine {
+                text: wrapped[0].clone(),
+                inset_left,
+                available_width,
+            });
+            y -= line_height;
+            if wrapped.len() == 1 {
                 break;
             }
-            remaining = wrapped[lines_until_float..].join(" ");
+            let next_remaining = advance_wrapped_text(&remaining, &wrapped[0]);
+            if next_remaining.is_empty() {
+                break;
+            }
+            remaining = next_remaining;
         }
 
         output
@@ -3674,9 +3663,9 @@ impl<'a> LayoutContext<'a> {
         if style.margin_top > 0.0 {
             self.current_y -= style.margin_top;
         }
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
-        let top_y = self.current_y;
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut insert_index = self.pages[page_index].items.len();
+        let mut top_y = self.current_y;
         let text = transform_text(text, style.text_transform);
         let base_left = self.inset_left
             - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Left);
@@ -3684,7 +3673,7 @@ impl<'a> LayoutContext<'a> {
             - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Right);
         let mut lines =
             self.wrap_text_with_floats(&text, style, base_left.max(0.0), base_right.max(0.0));
-        let available_width = lines
+        let mut available_width = lines
             .iter()
             .map(|line| line.available_width)
             .fold(0.0_f32, f32::max);
@@ -3697,16 +3686,46 @@ impl<'a> LayoutContext<'a> {
             }
         }
         let layout_line_height = layout_line_height(style);
-        let text_height = layout_line_height * lines.len() as f32;
+        let mut text_height = layout_line_height * lines.len() as f32;
         let height_base = self.options.page.height_pt
             - self.options.page.margin_top_pt
             - self.options.page.margin_bottom_pt;
-        let resolved_flow_height =
+        let mut resolved_flow_height =
             resolve_box_height(style, available_width, text_height, height_base);
-        let visible_overflow_capped =
+        let mut visible_overflow_capped =
             !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-        let flow_height = resolved_flow_height + style.margin_bottom;
-        self.ensure_space(flow_height.max(layout_line_height));
+        let initial_needed = if style.page_break_inside_avoid {
+            resolved_flow_height + style.margin_bottom
+        } else {
+            layout_line_height
+        };
+        let page_count_before = self.pages.len();
+        self.ensure_space(initial_needed.max(layout_line_height));
+        if self.pages.len() != page_count_before {
+            page_index = self.pages.len().saturating_sub(1);
+            insert_index = self.pages[page_index].items.len();
+            top_y = self.current_y;
+            lines =
+                self.wrap_text_with_floats(&text, style, base_left.max(0.0), base_right.max(0.0));
+            available_width = lines
+                .iter()
+                .map(|line| line.available_width)
+                .fold(0.0_f32, f32::max);
+            if style.white_space == WhiteSpace::NoWrap
+                && style.overflow_hidden
+                && style.text_overflow == TextOverflow::Ellipsis
+            {
+                for line in &mut lines {
+                    line.text =
+                        truncate_text_with_ellipsis(&line.text, style, line.available_width);
+                }
+            }
+            text_height = layout_line_height * lines.len() as f32;
+            resolved_flow_height =
+                resolve_box_height(style, available_width, text_height, height_base);
+            visible_overflow_capped =
+                !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
+        }
 
         if let Some(background) = style.background {
             let first_line = lines.first().expect("non-empty text should produce a line");
@@ -3832,9 +3851,13 @@ impl<'a> LayoutContext<'a> {
             resolve_box_height(style, available_width, text_height, height_base);
         let mut visible_overflow_capped =
             !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-        let mut flow_height = resolved_flow_height + style.margin_bottom;
+        let initial_needed = if style.page_break_inside_avoid {
+            resolved_flow_height + style.margin_bottom
+        } else {
+            layout_line_height
+        };
         let page_count_before = self.pages.len();
-        self.ensure_space(flow_height.max(layout_line_height));
+        self.ensure_space(initial_needed.max(layout_line_height));
         if self.pages.len() != page_count_before {
             page_index = self.pages.len().saturating_sub(1);
             insert_index = self.pages[page_index].items.len();
@@ -3854,8 +3877,7 @@ impl<'a> LayoutContext<'a> {
                 resolve_box_height(style, available_width, text_height, height_base);
             visible_overflow_capped =
                 !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-            flow_height = resolved_flow_height + style.margin_bottom;
-            self.ensure_space(flow_height.max(layout_line_height));
+            self.ensure_space(layout_line_height);
         }
 
         let line_count = lines.len();
@@ -8395,6 +8417,35 @@ fn wrap_text_with_style(text: &str, style: &ComputedStyle, available_width: f32)
     }
 }
 
+fn normalize_text_for_flow(text: &str, white_space: WhiteSpace) -> String {
+    match white_space {
+        WhiteSpace::PreLine => collapse_pre_line_whitespace_for_layout(text),
+        WhiteSpace::Normal | WhiteSpace::NoWrap => collapse_normal_whitespace_for_layout(text),
+    }
+}
+
+fn advance_wrapped_text(text: &str, line: &str) -> String {
+    let mut remaining = if let Some(rest) = text.strip_prefix(line) {
+        rest.to_string()
+    } else {
+        let skip_chars = line.chars().count().max(1);
+        let byte_index = text
+            .char_indices()
+            .nth(skip_chars)
+            .map(|(index, _)| index)
+            .unwrap_or(text.len());
+        text[byte_index..].to_string()
+    };
+    if remaining.starts_with('\n') {
+        remaining.remove(0);
+    } else {
+        while matches!(remaining.chars().next(), Some(' ' | '\t' | '\r')) {
+            remaining.remove(0);
+        }
+    }
+    remaining
+}
+
 fn collapse_normal_whitespace_for_layout(text: &str) -> String {
     let collapsed_parts = text
         .split('\n')
@@ -10323,6 +10374,74 @@ mod tests {
         assert!(link.color.b > 0.7 && link.color.r < 0.3);
         assert!(text_runs.iter().any(|text| text.x < first.x));
         assert!(hard_break.y < first.y, "br should advance to another line");
+    }
+
+    #[test]
+    fn long_text_float_reflows_with_full_width_on_continuation_page() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { margin: 0; }
+                .left { float: left; width: 60pt; height: 65pt; margin-right: 8pt; background: #2563eb; }
+            </style>
+            <div class="left"></div>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(
+            pages.len() >= 2,
+            "long flow should continue to another page"
+        );
+        let page_text = |page_index: usize| {
+            pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let first_page = page_text(0);
+        let second_page = page_text(1);
+        assert!(!first_page.is_empty(), "float page should contain text");
+        assert!(
+            !second_page.is_empty(),
+            "continuation page should contain text"
+        );
+        assert!(
+            first_page[0].x > 70.0,
+            "first page should wrap beside float: {:?}",
+            first_page[0]
+        );
+        assert!(
+            second_page[0].x < first_page[0].x,
+            "continuation page should discard the old float inset: first={:?} second={:?}",
+            first_page[0],
+            second_page[0]
+        );
+        let rendered = pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|text| text.contains("tango")));
     }
 
     #[test]

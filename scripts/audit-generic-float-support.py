@@ -8,6 +8,7 @@ CSS = ROOT / "crates/htmlpdf-core/src/css.rs"
 LAYOUT = ROOT / "crates/htmlpdf-core/src/layout.rs"
 FIXTURE = ROOT / "examples/generic-float.html"
 INLINE_FIXTURE = ROOT / "examples/generic-inline-float.html"
+PAGINATED_FIXTURE = ROOT / "examples/generic-paginated-float.html"
 
 checks = {
     CSS: [
@@ -17,6 +18,8 @@ checks = {
         '"clear" =>',
         "pub enum FloatSide",
         "pub enum ClearSide",
+        "parse_pt_or_px(dimensions[0])",
+        "landscape",
     ],
     LAYOUT: [
         "struct ActiveFloat",
@@ -43,6 +46,12 @@ checks = {
         "<em>énfasis</em>",
         "<a href=\"#details\">enlace</a>",
         "<br>",
+    ],
+    PAGINATED_FIXTURE: [
+        "@page { size: 220pt 140pt; margin: 10pt; }",
+        "height: 65pt",
+        "cruzar el final de la primera página",
+        "recuperar todo el ancho disponible",
     ],
 }
 

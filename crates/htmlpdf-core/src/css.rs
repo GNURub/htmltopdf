@@ -5010,9 +5010,25 @@ fn parse_page_declarations(input: &str) -> PageStyle {
                 if value.contains("a4") {
                     page.width_pt = Some(PageOptions::A4_WIDTH_PT);
                     page.height_pt = Some(PageOptions::A4_HEIGHT_PT);
+                    if value.contains("landscape") {
+                        std::mem::swap(&mut page.width_pt, &mut page.height_pt);
+                    }
                 } else if value.contains("letter") {
                     page.width_pt = Some(612.0);
                     page.height_pt = Some(792.0);
+                    if value.contains("landscape") {
+                        std::mem::swap(&mut page.width_pt, &mut page.height_pt);
+                    }
+                } else {
+                    let dimensions = value.split_whitespace().collect::<Vec<_>>();
+                    if dimensions.len() >= 2 {
+                        if let (Some(width), Some(height)) =
+                            (parse_pt_or_px(dimensions[0]), parse_pt_or_px(dimensions[1]))
+                        {
+                            page.width_pt = Some(width.max(1.0));
+                            page.height_pt = Some(height.max(1.0));
+                        }
+                    }
                 }
             }
             "margin" => {
@@ -9086,6 +9102,23 @@ mod tests {
         assert_eq!(left.float, FloatSide::Left);
         assert_eq!(right.float, FloatSide::Right);
         assert_eq!(clear.clear, ClearSide::Both);
+    }
+
+    #[test]
+    fn parses_custom_page_dimensions_and_landscape_orientation() {
+        let stylesheet = Stylesheet::from_css_chunks(vec![
+            "@page { size: 220pt 140pt; margin: 10pt; }".to_string(),
+        ]);
+        let page = stylesheet.page_options(PageOptions::letter());
+        assert!((page.width_pt - 220.0).abs() < 0.01);
+        assert!((page.height_pt - 140.0).abs() < 0.01);
+        assert!((page.margin_top_pt - 10.0).abs() < 0.01);
+
+        let landscape =
+            Stylesheet::from_css_chunks(vec!["@page { size: A4 landscape; }".to_string()])
+                .page_options(PageOptions::letter());
+        assert!((landscape.width_pt - PageOptions::A4_HEIGHT_PT).abs() < 0.01);
+        assert!((landscape.height_pt - PageOptions::A4_WIDTH_PT).abs() < 0.01);
     }
 
     #[test]
