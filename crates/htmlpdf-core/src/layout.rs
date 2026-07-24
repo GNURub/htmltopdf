@@ -1,9 +1,10 @@
 use crate::css::{
     AlignItems, BackgroundClip, BackgroundSize, BorderCollapse, BorderLineStyle, BoxShadow,
-    BoxSizing, Color, ComputedStyle, Display, FlexDirection, FlexWrap, FontFace, FontStyle,
-    FontWeight, GradientStop, GridTrack, JustifyContent, LinearGradient, ListStyleType, ObjectFit,
-    OverflowWrap, Position, PseudoElement, RadialGradient, Stylesheet, TextAlign, TextDecoration,
-    TextOverflow, TextTransform, TextWrapStyle, VerticalAlign, Visibility, WhiteSpace,
+    BoxSizing, ClearSide, Color, ComputedStyle, Display, FlexDirection, FlexWrap, FloatSide,
+    FontFace, FontStyle, FontWeight, GradientStop, GridTrack, JustifyContent, LinearGradient,
+    ListStyleType, ObjectFit, OverflowWrap, Position, PseudoElement, RadialGradient, Stylesheet,
+    TextAlign, TextDecoration, TextOverflow, TextTransform, TextWrapStyle, VerticalAlign,
+    Visibility, WhiteSpace,
 };
 use crate::dom::{Document, ElementNode, Node, NodeId};
 use crate::{PageOptions, RenderMode, RenderOptions};
@@ -209,6 +210,10 @@ struct LayoutContext<'a> {
     containing_blocks: Vec<ContainingBlock>,
     suppress_positioning: bool,
     suppress_keep_with_next: bool,
+    suppress_floats: bool,
+    floats: Vec<ActiveFloat>,
+    float_base_left: f32,
+    float_base_right: f32,
     style_cache: BTreeMap<NodeId, ComputedStyle>,
 }
 
@@ -218,6 +223,21 @@ struct ContainingBlock {
     top: f32,
     width: f32,
     height: f32,
+}
+
+#[derive(Clone, Copy)]
+struct ActiveFloat {
+    page_index: usize,
+    side: FloatSide,
+    bottom: f32,
+    occupied_width: f32,
+}
+
+#[derive(Clone)]
+struct FlowTextLine {
+    text: String,
+    inset_left: f32,
+    available_width: f32,
 }
 
 #[derive(Clone)]
@@ -298,11 +318,15 @@ pub fn layout_document(
         containing_blocks: Vec::new(),
         suppress_positioning: false,
         suppress_keep_with_next: false,
+        suppress_floats: false,
+        floats: Vec::new(),
+        float_base_left: 0.0,
+        float_base_right: 0.0,
         style_cache: BTreeMap::new(),
     };
 
     for child in document.children(document.root()) {
-        context.layout_node(*child);
+        context.layout_flow_child(*child, 0.0, 0.0);
     }
     prepend_document_background(document, stylesheet, options, &mut context.pages);
     append_print_margin_masks(&mut context.pages);
@@ -417,6 +441,224 @@ impl<'a> LayoutContext<'a> {
             })
     }
 
+    fn layout_flow_child(&mut self, id: NodeId, base_left: f32, base_right: f32) {
+        self.reflow_floats(base_left, base_right);
+        let child_style = match self.document.node(id) {
+            Some(Node::Element(_)) => Some(self.computed_style(id)),
+            _ => None,
+        };
+        if let Some(style) = child_style.as_ref() {
+            if style.clear != ClearSide::None
+                && !is_out_of_flow_position(style)
+                && style.display != Display::None
+            {
+                self.clear_floats(style.clear);
+                self.reflow_floats(base_left, base_right);
+            }
+            if style.float != FloatSide::None
+                && !is_out_of_flow_position(style)
+                && style.display != Display::None
+            {
+                self.layout_float(id, style, base_left, base_right);
+                return;
+            }
+        }
+        self.layout_node(id);
+    }
+
+    fn layout_float(&mut self, id: NodeId, style: &ComputedStyle, base_left: f32, base_right: f32) {
+        self.reflow_floats(base_left, base_right);
+        let page_content_width = (self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt)
+            .max(0.0);
+        let occupied_left = self.float_occupied_width(FloatSide::Left);
+        let occupied_right = self.float_occupied_width(FloatSide::Right);
+        let available_width =
+            (page_content_width - base_left - base_right - occupied_left - occupied_right).max(0.0);
+        let margin_width = style.margin_left + style.margin_right;
+        let box_width = if style.width.is_some() {
+            resolve_flow_horizontal_geometry(style, available_width)
+                .box_width
+                .min((available_width - margin_width).max(0.0))
+        } else {
+            (self.intrinsic_inline_width(id, available_width) - margin_width)
+                .max(0.0)
+                .min((available_width - margin_width).max(0.0))
+        };
+        let remaining = (available_width - box_width - margin_width).max(0.0);
+        let (temporary_left, temporary_right) = match style.float {
+            FloatSide::Left => (
+                base_left + occupied_left,
+                base_right + occupied_right + remaining,
+            ),
+            FloatSide::Right => (
+                base_left + occupied_left + remaining,
+                base_right + occupied_right,
+            ),
+            FloatSide::None => return,
+        };
+
+        let start_page = self.pages.len().saturating_sub(1);
+        let start_y = self.current_y;
+        let previous_left = self.inset_left;
+        let previous_right = self.inset_right;
+        let previous_suppress = self.suppress_floats;
+        self.inset_left = temporary_left;
+        self.inset_right = temporary_right;
+        self.suppress_floats = true;
+        self.layout_node(id);
+        self.suppress_floats = previous_suppress;
+        let float_page = self.pages.len().saturating_sub(1);
+        let float_bottom = self.current_y;
+        let float_top = if float_page == start_page {
+            start_y
+        } else {
+            self.options.page.height_pt - self.options.page.margin_top_pt
+        };
+        self.current_y = float_top;
+        self.inset_left = previous_left;
+        self.inset_right = previous_right;
+
+        if box_width > 0.0 && float_bottom < float_top {
+            self.floats.push(ActiveFloat {
+                page_index: float_page,
+                side: style.float,
+                bottom: float_bottom,
+                occupied_width: box_width + margin_width,
+            });
+        }
+        self.reflow_floats(base_left, base_right);
+    }
+
+    fn clear_floats(&mut self, clear: ClearSide) {
+        self.remove_expired_floats();
+        let bottom = self
+            .floats
+            .iter()
+            .filter(|float| match clear {
+                ClearSide::None => false,
+                ClearSide::Left => float.side == FloatSide::Left,
+                ClearSide::Right => float.side == FloatSide::Right,
+                ClearSide::Both => true,
+            })
+            .map(|float| float.bottom)
+            .min_by(f32::total_cmp);
+        if let Some(bottom) = bottom {
+            self.current_y = self.current_y.min(bottom);
+            self.ensure_space(0.0);
+        }
+    }
+
+    fn remove_expired_floats(&mut self) {
+        let page_index = self.pages.len().saturating_sub(1);
+        let current_y = self.current_y;
+        self.floats
+            .retain(|float| float.page_index == page_index && float.bottom < current_y - 0.01);
+    }
+
+    fn float_occupied_width(&self, side: FloatSide) -> f32 {
+        self.floats
+            .iter()
+            .filter(|float| float.side == side)
+            .map(|float| float.occupied_width)
+            .sum()
+    }
+
+    fn reflow_floats(&mut self, base_left: f32, base_right: f32) {
+        if self.suppress_floats {
+            self.inset_left = base_left;
+            self.inset_right = base_right;
+            return;
+        }
+        self.remove_expired_floats();
+        self.inset_left = base_left + self.float_occupied_width(FloatSide::Left);
+        self.inset_right = base_right + self.float_occupied_width(FloatSide::Right);
+    }
+
+    fn float_occupied_width_at_y(&self, page_index: usize, y: f32, side: FloatSide) -> f32 {
+        if self.suppress_floats {
+            return 0.0;
+        }
+        self.floats
+            .iter()
+            .filter(|float| {
+                float.page_index == page_index && float.side == side && float.bottom < y - 0.01
+            })
+            .map(|float| float.occupied_width)
+            .sum()
+    }
+
+    fn wrap_text_with_floats(
+        &self,
+        text: &str,
+        style: &ComputedStyle,
+        base_left: f32,
+        base_right: f32,
+    ) -> Vec<FlowTextLine> {
+        let page_index = self.pages.len().saturating_sub(1);
+        let mut remaining = text.to_string();
+        let mut y = self.current_y;
+        let line_height = layout_line_height(style).max(0.01);
+        let mut output = Vec::new();
+
+        while !remaining.is_empty() {
+            let occupied_left = self.float_occupied_width_at_y(page_index, y, FloatSide::Left);
+            let occupied_right = self.float_occupied_width_at_y(page_index, y, FloatSide::Right);
+            let inset_left = base_left + occupied_left;
+            let inset_right = base_right + occupied_right;
+            let raw_available_width = (self.options.page.width_pt
+                - self.options.page.margin_left_pt
+                - self.options.page.margin_right_pt
+                - inset_left
+                - inset_right)
+                .max(0.0);
+            let available_width = if style.width.is_some()
+                || style.min_width.is_some()
+                || style.max_width.is_some()
+            {
+                resolve_box_width(style, raw_available_width)
+            } else {
+                raw_available_width
+            };
+            let wrapped = wrap_text_with_style(&remaining, style, available_width);
+            if wrapped.is_empty() {
+                break;
+            }
+
+            let next_float_bottom = self
+                .floats
+                .iter()
+                .filter(|float| {
+                    !self.suppress_floats
+                        && float.page_index == page_index
+                        && float.bottom < y - 0.01
+                        && float.bottom > self.options.page.margin_bottom_pt
+                })
+                .map(|float| float.bottom)
+                .max_by(f32::total_cmp);
+            let lines_until_float = next_float_bottom
+                .map(|bottom| ((y - bottom) / line_height).ceil().max(1.0) as usize)
+                .unwrap_or(wrapped.len())
+                .min(wrapped.len());
+
+            for line in wrapped.iter().take(lines_until_float) {
+                output.push(FlowTextLine {
+                    text: line.clone(),
+                    inset_left,
+                    available_width,
+                });
+                y -= line_height;
+            }
+            if lines_until_float >= wrapped.len() {
+                break;
+            }
+            remaining = wrapped[lines_until_float..].join(" ");
+        }
+
+        output
+    }
+
     fn layout_node(&mut self, id: NodeId) {
         let visibility = match self.document.node(id) {
             Some(Node::Element(_)) => self.computed_style(id).visibility,
@@ -462,6 +704,15 @@ impl<'a> LayoutContext<'a> {
             Node::Element(element) => {
                 let style = self.computed_style(id);
                 if style.display == Display::None {
+                    return;
+                }
+                if !self.suppress_floats
+                    && style.float != FloatSide::None
+                    && !is_out_of_flow_position(&style)
+                {
+                    let base_left = self.float_base_left;
+                    let base_right = self.float_base_right;
+                    self.layout_float(id, &style, base_left, base_right);
                     return;
                 }
                 if !self.suppress_positioning && is_out_of_flow_position(&style) {
@@ -1539,6 +1790,40 @@ impl<'a> LayoutContext<'a> {
                     style.word_spacing,
                 );
                 width + inline_measurement_slack(&style)
+            }
+            Some(Node::Element(element)) if element.tag == "img" => {
+                let style = self.computed_style(id);
+                let Some(src) = element.attr("src") else {
+                    return 0.0;
+                };
+                let Some(intrinsic) = load_image_asset(src, self.options) else {
+                    return 0.0;
+                };
+                let intrinsic_width = intrinsic.intrinsic_width_px as f32 * 0.75;
+                let intrinsic_height = intrinsic.intrinsic_height_px as f32 * 0.75;
+                let aspect = if intrinsic_height > 0.0 {
+                    intrinsic_width / intrinsic_height
+                } else {
+                    1.0
+                };
+                let width = style
+                    .width
+                    .as_ref()
+                    .map(|width| width.resolve(available_width))
+                    .or_else(|| element.attr("width").and_then(parse_html_dimension_attr))
+                    .or_else(|| {
+                        style
+                            .height
+                            .as_ref()
+                            .map(|height| height.resolve(available_width) * aspect)
+                    })
+                    .unwrap_or(intrinsic_width.min(available_width));
+                let box_width = if style.box_sizing == BoxSizing::BorderBox {
+                    width
+                } else {
+                    width + horizontal_box_extras(&style)
+                };
+                box_width + style.margin_left + style.margin_right
             }
             Some(Node::Element(element)) if element.tag == "svg" => {
                 let style = self.computed_style(id);
@@ -3131,6 +3416,13 @@ impl<'a> LayoutContext<'a> {
         let trailing_space = containing_width - flow.margin_left - box_width;
         self.inset_left += flow.margin_left + style.padding_left;
         self.inset_right += trailing_space + style.padding_right;
+        let float_base_left = self.inset_left;
+        let float_base_right = self.inset_right;
+        let previous_float_base_left = self.float_base_left;
+        let previous_float_base_right = self.float_base_right;
+        let float_scope_start = self.floats.len();
+        self.float_base_left = float_base_left;
+        self.float_base_right = float_base_right;
 
         self.layout_generated_pseudo(id, style, PseudoElement::Before);
         let mut paint_stack_ranges = Vec::new();
@@ -3141,7 +3433,9 @@ impl<'a> LayoutContext<'a> {
                 _ => None,
             };
             if let Some(child_style) = child_style.as_ref() {
-                if can_collapse_adjacent_sibling_margin(child_style) {
+                if child_style.float == FloatSide::None
+                    && can_collapse_adjacent_sibling_margin(child_style)
+                {
                     if let Some(previous_margin_bottom) = previous_collapsible_margin_bottom {
                         self.current_y +=
                             previous_margin_bottom.min(child_style.margin_top).max(0.0);
@@ -3150,7 +3444,7 @@ impl<'a> LayoutContext<'a> {
             }
             let child_page_index = self.pages.len().saturating_sub(1);
             let item_start = self.pages[child_page_index].items.len();
-            self.layout_node(child);
+            self.layout_flow_child(child, float_base_left, float_base_right);
             let item_end = self
                 .pages
                 .get(child_page_index)
@@ -3169,7 +3463,9 @@ impl<'a> LayoutContext<'a> {
             }
             previous_collapsible_margin_bottom = child_style
                 .as_ref()
-                .filter(|style| can_collapse_adjacent_sibling_margin(style))
+                .filter(|style| {
+                    style.float == FloatSide::None && can_collapse_adjacent_sibling_margin(style)
+                })
                 .map(|style| style.margin_bottom.max(0.0));
         }
         self.layout_generated_pseudo(id, style, PseudoElement::After);
@@ -3180,6 +3476,9 @@ impl<'a> LayoutContext<'a> {
             let _ = self.containing_blocks.pop();
         }
 
+        self.floats.truncate(float_scope_start);
+        self.float_base_left = previous_float_base_left;
+        self.float_base_right = previous_float_base_right;
         self.inset_left = previous_left;
         self.inset_right = previous_right;
         self.current_y -= style.padding_bottom;
@@ -3312,26 +3611,23 @@ impl<'a> LayoutContext<'a> {
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
         let top_y = self.current_y;
-
-        let raw_available_width = self.options.page.width_pt
-            - self.options.page.margin_left_pt
-            - self.options.page.margin_right_pt
-            - self.inset_left
-            - self.inset_right;
-        let available_width =
-            if style.width.is_some() || style.min_width.is_some() || style.max_width.is_some() {
-                resolve_box_width(style, raw_available_width)
-            } else {
-                raw_available_width
-            };
         let text = transform_text(text, style.text_transform);
-        let mut lines = wrap_text_with_style(&text, style, available_width);
+        let base_left = self.inset_left
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Left);
+        let base_right = self.inset_right
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Right);
+        let mut lines =
+            self.wrap_text_with_floats(&text, style, base_left.max(0.0), base_right.max(0.0));
+        let available_width = lines
+            .iter()
+            .map(|line| line.available_width)
+            .fold(0.0_f32, f32::max);
         if style.white_space == WhiteSpace::NoWrap
             && style.overflow_hidden
             && style.text_overflow == TextOverflow::Ellipsis
         {
             for line in &mut lines {
-                *line = truncate_text_with_ellipsis(line, style, available_width);
+                line.text = truncate_text_with_ellipsis(&line.text, style, line.available_width);
             }
         }
         let layout_line_height = layout_line_height(style);
@@ -3347,11 +3643,12 @@ impl<'a> LayoutContext<'a> {
         self.ensure_space(flow_height.max(layout_line_height));
 
         if let Some(background) = style.background {
+            let first_line = lines.first().expect("non-empty text should produce a line");
             let y = self.current_y - layout_line_height * lines.len() as f32 + 2.0;
             self.push(LayoutItem::Rect(Rect {
-                x: self.options.page.margin_left_pt + self.inset_left,
+                x: self.options.page.margin_left_pt + first_line.inset_left,
                 y,
-                width: available_width,
+                width: first_line.available_width,
                 height: layout_line_height * lines.len() as f32 + 6.0,
                 color: background.with_opacity(style.opacity),
             }));
@@ -3360,7 +3657,7 @@ impl<'a> LayoutContext<'a> {
         let line_count = lines.len();
         for (line_index, line) in lines.into_iter().enumerate() {
             let width = estimate_text_width_with_spacing(
-                &line,
+                &line.text,
                 style.font_size,
                 style.font_face,
                 style.font_weight,
@@ -3369,34 +3666,34 @@ impl<'a> LayoutContext<'a> {
             );
             let resolved_align = resolved_line_text_align(style, line_index, line_count);
             let x = match resolved_align {
-                TextAlign::Left => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Left => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Center => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - width).max(0.0) / 2.0
+                        + line.inset_left
+                        + (line.available_width - width).max(0.0) / 2.0
                 }
                 TextAlign::Right => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - width).max(0.0)
+                        + line.inset_left
+                        + (line.available_width - width).max(0.0)
                 }
-                TextAlign::Justify => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Justify => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Start | TextAlign::End => {
                     unreachable!("resolved_line_text_align must resolve logical alignments")
                 }
             };
             let word_spacing = justified_word_spacing(
                 resolved_align,
-                &line,
+                &line.text,
                 width,
-                available_width,
+                line.available_width,
                 style.word_spacing,
                 suppress_justify_spacing_for_line(style, line_index, line_count),
             );
             self.push(LayoutItem::Text(TextRun {
                 x,
                 y: self.current_y - style.font_size,
-                text: line,
+                text: line.text,
                 font_size: style.font_size,
                 color: style.color.with_opacity(style.opacity),
                 font_weight: style.font_weight,
@@ -3905,6 +4202,9 @@ impl<'a> LayoutContext<'a> {
             items: Vec::new(),
         });
         self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.floats.clear();
+        self.inset_left = self.float_base_left;
+        self.inset_right = self.float_base_right;
     }
 
     fn force_page_break(&mut self) {
@@ -3918,6 +4218,9 @@ impl<'a> LayoutContext<'a> {
             items: Vec::new(),
         });
         self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.floats.clear();
+        self.inset_left = self.float_base_left;
+        self.inset_right = self.float_base_right;
     }
 
     fn should_start_avoid_block_on_next_page(&self, id: NodeId, style: &ComputedStyle) -> bool {
@@ -9746,6 +10049,66 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_wrap_following_text_and_clear_moves_flow_below_float() {
+        let html = r#"
+            <style>
+                @page { size: Letter; margin: 0; }
+                body { font-size: 12px; line-height: 14px; }
+                .left { float: left; width: 96px; height: 20px; margin-right: 16px; background: #2563eb; }
+                .after { clear: both; }
+            </style>
+            <div class="left"></div>
+            <p>Text that wraps beside the left floating box for several lines of content. More words make the float interaction cross multiple line boxes and continue after the float has ended so the available width can expand again.</p>
+            <p class="after">Text after clear should be below the floating box.</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &crate::RenderOptions::default());
+        let items = &pages[0].items;
+        let float_rect = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b > 0.7 && rect.color.r < 0.3 => Some(rect),
+                _ => None,
+            })
+            .expect("float background");
+        let cleared_index = items
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Text(text) if text.text.starts_with("Text after clear")
+                )
+            })
+            .expect("cleared text");
+        let wrapped_texts = items[..cleared_index]
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let wrapped_text = wrapped_texts.first().expect("wrapped text");
+        let cleared_text = match &items[cleared_index] {
+            LayoutItem::Text(text) => text,
+            _ => unreachable!("cleared index points to text"),
+        };
+
+        assert!(wrapped_text.x >= 110.0, "x={}", wrapped_text.x);
+        assert!(
+            wrapped_texts.iter().any(|text| text.x < wrapped_text.x),
+            "the paragraph should regain full width after the float ends: {wrapped_texts:#?}"
+        );
+        assert!(cleared_text.x < wrapped_text.x, "x={}", cleared_text.x);
+        assert!(
+            cleared_text.y < float_rect.y,
+            "y={} float_bottom={}",
+            cleared_text.y,
+            float_rect.y
+        );
+    }
 
     #[test]
     fn splits_long_words_at_soft_breaks_before_character_breaking() {

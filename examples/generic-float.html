@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Generic float fixture</title>
+  <style>
+    @page { size: Letter; margin: 0; }
+    body { font-size: 12px; line-height: 14px; color: #111827; }
+    .float-left {
+      float: left;
+      width: 96px;
+      height: 64px;
+      margin: 0 16px 8px 0;
+      border-radius: 8px;
+      background: #2563eb;
+    }
+    .float-right {
+      float: right;
+      width: 82px;
+      height: 48px;
+      margin: 0 0 8px 16px;
+      border-radius: 8px;
+      background: #0f766e;
+    }
+    .clear-both { clear: both; }
+  </style>
+</head>
+<body>
+  <div class="float-left"></div>
+  <p>Este párrafo debe rodear la caja flotante y usar el ancho restante mientras la caja ocupa la izquierda. La siguiente frase prolonga el contenido para comprobar que las líneas conservan el espacio disponible mientras el float sigue activo.</p>
+  <div class="float-right"></div>
+  <p>Este segundo párrafo debe rodear la caja de la derecha durante sus líneas iniciales. También debe recuperar todo el ancho cuando la caja termina, sin solaparse ni perder texto.</p>
+  <p class="clear-both">Este bloque se coloca debajo de ambos floats gracias a clear: both.</p>
+</body>
+</html>

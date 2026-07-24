@@ -301,6 +301,8 @@ pub struct ComputedStyle {
     pub max_height: Option<CssLength>,
     pub aspect_ratio: Option<f32>,
     pub position: Position,
+    pub float: FloatSide,
+    pub clear: ClearSide,
     pub z_index: Option<i32>,
     pub inset_top: Option<CssLength>,
     pub inset_right: Option<CssLength>,
@@ -630,6 +632,39 @@ impl ComputedStyle {
                     "static" => self.position = Position::Static,
                     _ => {}
                 },
+                "float" => {
+                    self.float = match value.as_str() {
+                        "left" => FloatSide::Left,
+                        "right" => FloatSide::Right,
+                        "inline-start" => match self.direction {
+                            TextDirection::Ltr => FloatSide::Left,
+                            TextDirection::Rtl => FloatSide::Right,
+                        },
+                        "inline-end" => match self.direction {
+                            TextDirection::Ltr => FloatSide::Right,
+                            TextDirection::Rtl => FloatSide::Left,
+                        },
+                        "none" => FloatSide::None,
+                        _ => self.float,
+                    };
+                }
+                "clear" => {
+                    self.clear = match value.as_str() {
+                        "left" => ClearSide::Left,
+                        "right" => ClearSide::Right,
+                        "both" => ClearSide::Both,
+                        "inline-start" => match self.direction {
+                            TextDirection::Ltr => ClearSide::Left,
+                            TextDirection::Rtl => ClearSide::Right,
+                        },
+                        "inline-end" => match self.direction {
+                            TextDirection::Ltr => ClearSide::Right,
+                            TextDirection::Rtl => ClearSide::Left,
+                        },
+                        "none" => ClearSide::None,
+                        _ => self.clear,
+                    };
+                }
                 "z-index" => {
                     self.z_index = if value == "auto" {
                         None
@@ -1854,6 +1889,8 @@ impl Default for ComputedStyle {
             max_height: None,
             aspect_ratio: None,
             position: Position::Static,
+            float: FloatSide::None,
+            clear: ClearSide::None,
             z_index: None,
             inset_top: None,
             inset_right: None,
@@ -1936,6 +1973,8 @@ fn is_supported_property(property: &str) -> bool {
             | "content-visibility"
             | "clip"
             | "position"
+            | "float"
+            | "clear"
             | "z-index"
             | "isolation"
             | "inset"
@@ -2348,6 +2387,21 @@ pub enum Position {
     Absolute,
     Fixed,
     Sticky,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSide {
+    None,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearSide {
+    None,
+    Left,
+    Right,
+    Both,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9001,6 +9055,38 @@ fn parse_percent_unit(value: &str) -> Option<f32> {
 mod tests {
     use super::*;
     use crate::parser::parse_document;
+
+    #[test]
+    fn parses_float_and_clear_flow_properties() {
+        let document = parse_document(
+            r#"<div class="left"></div><div class="right"></div><div class="clear"></div>"#,
+        )
+        .expect("valid html");
+        let stylesheet = Stylesheet::from_css_chunks(vec![
+            ".left { float: left; } .right { float: inline-end; direction: ltr; } .clear { clear: both; }"
+                .to_string(),
+        ]);
+
+        let left = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".left").expect("left exists"),
+        );
+        let right = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".right").expect("right exists"),
+        );
+        let clear = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".clear").expect("clear exists"),
+        );
+
+        assert_eq!(left.float, FloatSide::Left);
+        assert_eq!(right.float, FloatSide::Right);
+        assert_eq!(clear.clear, ClearSide::Both);
+    }
 
     #[test]
     fn expands_is_and_where_selector_lists_across_all_arguments() {
