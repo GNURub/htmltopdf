@@ -17,7 +17,7 @@ checks = {
         "TextTransform::Capitalize",
         '"letter-spacing" =>',
         "parse_letter_spacing_with_rem",
-        '"transform" =>',
+        '"transform" | "-webkit-transform" =>',
         "parse_css_transform",
         "parse_rotate_value",
         "transform_rotate_deg",
