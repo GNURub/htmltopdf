@@ -5,6 +5,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "crates/htmlpdf-cli/src/main.rs"
 LIB = ROOT / "crates/htmlpdf-core/src/lib.rs"
+PDF = ROOT / "crates/htmlpdf-core/src/pdf.rs"
 README = ROOT / "README.md"
 DOC = ROOT / "docs/architecture/generic-rendering-strategy.md"
 checks = {
@@ -15,11 +16,14 @@ checks = {
         "render_html_to_pages",
         "htmlpdf render <files...> -o <combined.pdf>",
         "output_dir.extension().is_some()",
-        "same_media_box",
     ],
     LIB: [
         "pub fn render_html_to_pages",
         "pub fn write_pages_to_pdf",
+    ],
+    PDF: [
+        "let page = layout_page.page;",
+        "/MediaBox [0 0 {} {}]",
     ],
     README: [
         "cargo run -p htmlpdf-cli -- render examples/*.html -o out-examples",
