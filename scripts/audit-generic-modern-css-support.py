@@ -7,6 +7,7 @@ CSS = ROOT / "crates/htmlpdf-core/src/css.rs"
 LAYOUT = ROOT / "crates/htmlpdf-core/src/layout.rs"
 PDF = ROOT / "crates/htmlpdf-core/src/pdf.rs"
 FIXTURE = ROOT / "examples/generic-modern-css.html"
+FIXED_FIXTURE = ROOT / "examples/generic-fixed.html"
 checks = {
     CSS: [
         "variables: BTreeMap<String, String>",
@@ -408,6 +409,9 @@ checks = {
         "struct ContainingBlock",
         "containing_blocks: Vec<ContainingBlock>",
         "fn layout_positioned_node",
+        "fixed_overlays: Vec<Vec<LayoutItem>>",
+        "fn register_fixed_overlay",
+        "fn start_new_page",
         "fn positioned_width",
         "fn positioned_height",
         "fn is_out_of_flow_position",
@@ -724,6 +728,12 @@ checks = {
         "--local-pill: var(--missing-pill, hsl(199 89% 48%))",
         "@container (min-width: 20rem)",
         ".container-enhanced",
+    ],
+    FIXED_FIXTURE: [
+        "position: fixed",
+        "Fixed header",
+        "Fixed footer",
+        "<p>alpha bravo charlie",
     ],
 }
 errors = []

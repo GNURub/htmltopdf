@@ -214,6 +214,7 @@ struct LayoutContext<'a> {
     floats: Vec<ActiveFloat>,
     float_base_left: f32,
     float_base_right: f32,
+    fixed_overlays: Vec<Vec<LayoutItem>>,
     style_cache: BTreeMap<NodeId, ComputedStyle>,
 }
 
@@ -329,12 +330,14 @@ pub fn layout_document(
         floats: Vec::new(),
         float_base_left: 0.0,
         float_base_right: 0.0,
+        fixed_overlays: Vec::new(),
         style_cache: BTreeMap::new(),
     };
 
     for child in document.children(document.root()) {
         context.layout_flow_child(*child, 0.0, 0.0);
     }
+    context.append_fixed_overlays();
     prepend_document_background(document, stylesheet, options, &mut context.pages);
     append_print_margin_masks(&mut context.pages);
 
@@ -960,11 +963,16 @@ impl<'a> LayoutContext<'a> {
         self.inset_left = inset_left;
         self.inset_right = inset_right;
         self.suppress_positioning = true;
+        let overlay_page_index = self.pages.len().saturating_sub(1);
+        let overlay_item_start = self.pages[overlay_page_index].items.len();
         self.layout_node(id);
         self.suppress_positioning = previous_suppress;
         self.current_y = previous_y;
         self.inset_left = previous_left;
         self.inset_right = previous_right;
+        if style.position == Position::Fixed {
+            self.register_fixed_overlay(overlay_page_index, overlay_item_start);
+        }
     }
 
     fn positioned_node_width(
@@ -4544,32 +4552,14 @@ impl<'a> LayoutContext<'a> {
         if self.pages.last().is_some_and(|page| page.items.is_empty()) {
             return;
         }
-        let number = self.pages.len() + 1;
-        self.pages.push(LayoutPage {
-            number,
-            page: self.options.page,
-            items: Vec::new(),
-        });
-        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
-        self.floats.clear();
-        self.inset_left = self.float_base_left;
-        self.inset_right = self.float_base_right;
+        self.start_new_page();
     }
 
     fn force_page_break(&mut self) {
         if self.pages.last().is_some_and(|page| page.items.is_empty()) {
             return;
         }
-        let number = self.pages.len() + 1;
-        self.pages.push(LayoutPage {
-            number,
-            page: self.options.page,
-            items: Vec::new(),
-        });
-        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
-        self.floats.clear();
-        self.inset_left = self.float_base_left;
-        self.inset_right = self.float_base_right;
+        self.start_new_page();
     }
 
     fn should_start_avoid_block_on_next_page(&self, id: NodeId, style: &ComputedStyle) -> bool {
@@ -4698,6 +4688,48 @@ impl<'a> LayoutContext<'a> {
         if let Some(page) = self.pages.last_mut() {
             page.items.push(item);
         }
+    }
+
+    fn register_fixed_overlay(&mut self, page_index: usize, item_start: usize) {
+        let Some(page) = self.pages.get(page_index) else {
+            return;
+        };
+        let overlay = page.items.get(item_start..).unwrap_or_default().to_vec();
+        if overlay.is_empty() {
+            return;
+        }
+
+        if let Some(page) = self.pages.get_mut(page_index) {
+            page.items.truncate(item_start);
+        }
+        self.fixed_overlays.push(overlay);
+    }
+
+    fn append_fixed_overlays(&mut self) {
+        if self.fixed_overlays.is_empty() {
+            return;
+        }
+        let overlays = self
+            .fixed_overlays
+            .iter()
+            .flat_map(|overlay| overlay.iter().cloned())
+            .collect::<Vec<_>>();
+        for page in &mut self.pages {
+            page.items.extend(overlays.iter().cloned());
+        }
+    }
+
+    fn start_new_page(&mut self) {
+        let number = self.pages.len() + 1;
+        self.pages.push(LayoutPage {
+            number,
+            page: self.options.page,
+            items: Vec::new(),
+        });
+        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.floats.clear();
+        self.inset_left = self.float_base_left;
+        self.inset_right = self.float_base_right;
     }
 
     fn insert_continuation_background_fragments(
@@ -10921,6 +10953,61 @@ mod tests {
                 "text escaped below page {page_index}: {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn fixed_positioned_content_repeats_on_every_printed_page() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                .fixed { position: fixed; top: 4pt; left: 10pt; width: 200pt; height: 12pt; color: #ffffff; background: #1d4ed8; }
+                p { margin: 0 0 8pt; }
+            </style>
+            <div class="fixed">Fixed header</div>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu</p>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour</p>
+            <p>red orange yellow green blue indigo violet cyan magenta black white gray silver gold copper bronze</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(pages.len() >= 2, "fixture should span several pages");
+        for (page_index, page) in pages.iter().enumerate() {
+            let fixed_runs = page
+                .items
+                .iter()
+                .filter(
+                    |item| matches!(item, LayoutItem::Text(text) if text.text == "Fixed header"),
+                )
+                .count();
+            assert_eq!(
+                fixed_runs, 1,
+                "fixed content missing or duplicated on page {page_index}"
+            );
+        }
+        let normal_text_pages = pages
+            .iter()
+            .filter(|page| {
+                page.items.iter().any(
+                    |item| matches!(item, LayoutItem::Text(text) if text.text.contains("alpha")),
+                )
+            })
+            .count();
+        assert_eq!(
+            normal_text_pages, 1,
+            "normal flow text should not duplicate"
+        );
     }
 
     #[test]
