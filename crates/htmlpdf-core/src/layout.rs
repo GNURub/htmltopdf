@@ -8488,6 +8488,42 @@ pub(crate) fn standard_pdf_glyph_width(
     }
 }
 
+pub(crate) fn is_winansi_char(ch: char) -> bool {
+    (ch.is_ascii() && !ch.is_control())
+        || ('\u{00a0}'..='\u{00ff}').contains(&ch)
+        || matches!(
+            ch,
+            '€' | '‚'
+                | 'ƒ'
+                | '„'
+                | '…'
+                | '†'
+                | '‡'
+                | 'ˆ'
+                | '‰'
+                | 'Š'
+                | '‹'
+                | 'Œ'
+                | 'Ž'
+                | '‘'
+                | '’'
+                | '“'
+                | '”'
+                | '•'
+                | '●'
+                | '−'
+                | '–'
+                | '—'
+                | '˜'
+                | '™'
+                | 'š'
+                | '›'
+                | 'œ'
+                | 'ž'
+                | 'Ÿ'
+        )
+}
+
 pub(crate) fn is_boldish(font_weight: FontWeight) -> bool {
     matches!(font_weight, FontWeight::Bold | FontWeight::Heavy)
 }
@@ -8498,7 +8534,7 @@ fn using_real_font_metrics() -> bool {
 }
 
 fn true_type_glyph_width(ch: char, font_face: FontFace, font_weight: FontWeight) -> Option<f32> {
-    if !using_real_font_metrics() {
+    if !using_real_font_metrics() && is_winansi_char(ch) {
         return None;
     }
     let index = font_metric_index(font_face, font_weight);
