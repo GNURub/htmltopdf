@@ -29,6 +29,15 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             &html[cursor..open],
         );
 
+        if html[open..].starts_with("<!--") {
+            let comment_start = open + "<!--".len();
+            let Some(end_rel) = html[comment_start..].find("-->") else {
+                break;
+            };
+            cursor = comment_start + end_rel + "-->".len();
+            continue;
+        }
+
         let Some(close_rel) = html[open..].find('>') else {
             push_text(&mut document, *stack.last().unwrap_or(&0), &html[open..]);
             break;
@@ -165,11 +174,127 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
 }
 
 fn decode_entities(input: &str) -> String {
-    input
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
+    let mut output = String::with_capacity(input.len());
+    let mut cursor = 0;
+
+    while let Some(relative_ampersand) = input[cursor..].find('&') {
+        let ampersand = cursor + relative_ampersand;
+        output.push_str(&input[cursor..ampersand]);
+
+        let entity_start = ampersand + 1;
+        let Some(relative_semicolon) = input[entity_start..].find(';') else {
+            output.push('&');
+            cursor = entity_start;
+            continue;
+        };
+        let semicolon = entity_start + relative_semicolon;
+        let entity = &input[entity_start..semicolon];
+        if let Some(character) = decode_entity(entity) {
+            output.push(character);
+        } else {
+            output.push_str(&input[ampersand..=semicolon]);
+        }
+        cursor = semicolon + 1;
+    }
+
+    output.push_str(&input[cursor..]);
+    output
+}
+
+fn decode_entity(entity: &str) -> Option<char> {
+    if let Some(value) = entity
+        .strip_prefix("#x")
+        .or_else(|| entity.strip_prefix("#X"))
+    {
+        return u32::from_str_radix(value, 16)
+            .ok()
+            .and_then(decode_codepoint);
+    }
+    if let Some(value) = entity.strip_prefix('#') {
+        return value.parse::<u32>().ok().and_then(decode_codepoint);
+    }
+
+    let name = entity.to_ascii_lowercase();
+    let character = match name.as_str() {
+        "nbsp" => '\u{00a0}',
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "quot" => '"',
+        "apos" => '\'',
+        "copy" => '\u{00a9}',
+        "reg" => '\u{00ae}',
+        "trade" => '\u{2122}',
+        "euro" => '\u{20ac}',
+        "pound" => '\u{00a3}',
+        "yen" => '\u{00a5}',
+        "cent" => '\u{00a2}',
+        "curren" => '\u{00a4}',
+        "deg" => '\u{00b0}',
+        "plusmn" => '\u{00b1}',
+        "micro" => '\u{00b5}',
+        "para" => '\u{00b6}',
+        "middot" => '\u{00b7}',
+        "times" => '\u{00d7}',
+        "divide" => '\u{00f7}',
+        "ndash" => '\u{2013}',
+        "mdash" => '\u{2014}',
+        "lsquo" => '\u{2018}',
+        "rsquo" => '\u{2019}',
+        "ldquo" => '\u{201c}',
+        "rdquo" => '\u{201d}',
+        "bull" => '\u{2022}',
+        "hellip" => '\u{2026}',
+        "laquo" => '\u{00ab}',
+        "raquo" => '\u{00bb}',
+        "sect" => '\u{00a7}',
+        "frac14" => '\u{00bc}',
+        "frac12" => '\u{00bd}',
+        "frac34" => '\u{00be}',
+        _ => return None,
+    };
+    Some(character)
+}
+
+fn decode_codepoint(value: u32) -> Option<char> {
+    match value {
+        0 | 0xd800..=0xdfff | 0x110000.. => Some('\u{fffd}'),
+        value => char::from_u32(value),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skips_comments_even_when_they_contain_tag_like_text() {
+        let document =
+            parse_document("<p>Before<!-- ignored > <span>still ignored</span> -->After</p>")
+                .expect("valid html");
+        let paragraph = document.query_selector("p").expect("paragraph exists");
+
+        assert_eq!(document.text_content(paragraph), "Before After");
+        assert!(document.query_selector("span").is_none());
+    }
+
+    #[test]
+    fn decodes_named_and_numeric_entities_in_text() {
+        assert_eq!(
+            decode_entities("&lt;invoice&gt; &amp; &#x20AC; &#128640; &unknown;"),
+            "<invoice> & € 🚀 &unknown;"
+        );
+    }
+
+    #[test]
+    fn decodes_entities_in_attributes() {
+        let document = parse_document(r#"<div title="A &quot;quote&quot; &amp; more"></div>"#)
+            .expect("valid html");
+        let node = document.query_selector("div").expect("div exists");
+
+        let Some(crate::dom::Node::Element(element)) = document.node(node) else {
+            panic!("expected element node");
+        };
+        assert_eq!(element.attr("title"), Some("A \"quote\" & more"));
+    }
 }

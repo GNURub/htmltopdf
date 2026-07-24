@@ -92,6 +92,7 @@ HTML:
 - Text blocks: `h1`, `h2`, `h3`, `p`, `small`
 - Basic table layout: `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, including nested block text inside cells and rounded header backgrounds for `border-radius` tables
 - Metadata ignored: `head`, `title`, `meta`
+- HTML comments are ignored without leaking tag-like text; common named entities plus decimal and hexadecimal numeric character references are decoded in text and attributes
 - `style` and `script` are consumed by the renderer, not painted
 - First-pass inline SVG shapes: `svg`, filled/stroked `rect`, `circle`, stroked `circle`, `line`, `polygon`, `text`, and basic `path` commands (`M`, `L`, `H`, `V`, `C`, `Q`, `Z`) with `viewBox`, basic fill/stroke colors, `fill-opacity`, `stroke-opacity`, `stroke-linecap="round"`, `currentColor`, clipped `linearGradient` fills for SVG rects, and averaged-stop fallback for other `url(#linearGradient)`/`url(#radialGradient)` paint servers including `stop-opacity`
 
