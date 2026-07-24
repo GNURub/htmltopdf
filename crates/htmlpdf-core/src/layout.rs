@@ -4054,6 +4054,7 @@ impl<'a> LayoutContext<'a> {
             height,
             style,
         );
+        self.apply_relative_position_to_following_pages(page_index, style, available_width, height);
         let final_height = resolve_box_height(style, available_width, height, height_base);
         self.apply_same_page_flow_box_height(page_index, top_y, final_height);
         self.current_y -= style.margin_bottom;
@@ -4199,6 +4200,7 @@ impl<'a> LayoutContext<'a> {
             height,
             style,
         );
+        self.apply_relative_position_to_following_pages(page_index, style, available_width, height);
         let final_height = resolve_box_height(style, available_width, height, height_base);
         self.apply_same_page_flow_box_height(page_index, top_y, final_height);
         self.current_y -= style.margin_bottom;
@@ -4410,16 +4412,20 @@ impl<'a> LayoutContext<'a> {
         if item_start >= page.items.len() {
             return;
         }
-        let translate_x = style
+        let transform_translate_x = style
             .transform_translate_x
             .as_ref()
             .map(|value| value.resolve(width))
             .unwrap_or(0.0);
-        let translate_y_css = style
+        let transform_translate_y_css = style
             .transform_translate_y
             .as_ref()
             .map(|value| value.resolve(height))
             .unwrap_or(0.0);
+        let (relative_translate_x, relative_translate_y_css) =
+            relative_position_offset(style, width, height);
+        let translate_x = transform_translate_x + relative_translate_x;
+        let translate_y_css = transform_translate_y_css + relative_translate_y_css;
         let scale_x = style.transform_scale_x;
         let scale_y = style.transform_scale_y;
         let rotate_deg = style.transform_rotate_deg;
@@ -4445,6 +4451,38 @@ impl<'a> LayoutContext<'a> {
         }
         if has_translate {
             shift_layout_items(&mut page.items[item_start..], translate_x, -translate_y_css);
+        }
+    }
+
+    fn apply_relative_position_to_range(
+        &mut self,
+        page_index: usize,
+        item_start: usize,
+        style: &ComputedStyle,
+        width: f32,
+        height: f32,
+    ) {
+        let (translate_x, translate_y_css) = relative_position_offset(style, width, height);
+        if translate_x.abs() <= 0.001 && translate_y_css.abs() <= 0.001 {
+            return;
+        }
+        let Some(page) = self.pages.get_mut(page_index) else {
+            return;
+        };
+        if item_start < page.items.len() {
+            shift_layout_items(&mut page.items[item_start..], translate_x, -translate_y_css);
+        }
+    }
+
+    fn apply_relative_position_to_following_pages(
+        &mut self,
+        first_page_index: usize,
+        style: &ComputedStyle,
+        width: f32,
+        height: f32,
+    ) {
+        for page_index in (first_page_index + 1)..self.pages.len() {
+            self.apply_relative_position_to_range(page_index, 0, style, width, height);
         }
     }
 
@@ -5099,6 +5137,35 @@ fn nearly_equal_color(left: Color, right: Color) -> bool {
 
 fn is_out_of_flow_position(style: &ComputedStyle) -> bool {
     matches!(style.position, Position::Absolute | Position::Fixed)
+}
+
+fn relative_position_offset(style: &ComputedStyle, width: f32, height: f32) -> (f32, f32) {
+    if style.position != Position::Relative {
+        return (0.0, 0.0);
+    }
+    let translate_x = style
+        .inset_left
+        .as_ref()
+        .map(|value| value.resolve(width))
+        .or_else(|| {
+            style
+                .inset_right
+                .as_ref()
+                .map(|value| -value.resolve(width))
+        })
+        .unwrap_or(0.0);
+    let translate_y_css = style
+        .inset_top
+        .as_ref()
+        .map(|value| value.resolve(height))
+        .or_else(|| {
+            style
+                .inset_bottom
+                .as_ref()
+                .map(|value| -value.resolve(height))
+        })
+        .unwrap_or(0.0);
+    (translate_x, translate_y_css)
 }
 
 fn is_positioned_containing_block(style: &ComputedStyle) -> bool {
@@ -11007,6 +11074,118 @@ mod tests {
         assert_eq!(
             normal_text_pages, 1,
             "normal flow text should not duplicate"
+        );
+    }
+
+    #[test]
+    fn relative_position_offsets_paint_without_changing_flow() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                .relative { position: relative; left: 20pt; top: 8pt; width: 80pt; height: 20pt; background: #2563eb; color: #ffffff; }
+                .after { margin: 0; }
+            </style>
+            <div class="relative">relative content</div>
+            <p class="after">flow continues below the original box position</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let items = &pages[0].items;
+        let relative_background = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect)
+                    if rect.color.b > 0.7 && rect.color.r < 0.3 && rect.color.g < 0.5 =>
+                {
+                    Some(rect)
+                }
+                _ => None,
+            })
+            .expect("relative background");
+        let relative_text = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text == "relative content" => Some(text),
+                _ => None,
+            })
+            .expect("relative text");
+        let following_text = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("flow continues") => Some(text),
+                _ => None,
+            })
+            .expect("following flow text");
+
+        assert!(
+            relative_background.x > 25.0,
+            "left offset was ignored: {relative_background:?}"
+        );
+        assert!(
+            relative_text.x > 25.0,
+            "text left offset was ignored: {relative_text:?}"
+        );
+        assert!(
+            relative_text.y < 120.0,
+            "top offset was ignored: {relative_text:?}"
+        );
+        assert_eq!(
+            following_text.x, 10.0,
+            "relative offset leaked into following flow"
+        );
+        assert!(
+            (following_text.y - 98.0).abs() < 0.1,
+            "following content should retain its normal flow position: relative={relative_text:?} following={following_text:?}"
+        );
+    }
+
+    #[test]
+    fn relative_offset_survives_text_continuation_pages() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { position: relative; left: 16pt; top: 4pt; margin: 0; }
+            </style>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert!(pages.len() >= 2, "text should continue onto another page");
+        let text_runs = pages
+            .iter()
+            .flat_map(|page| {
+                page.items.iter().filter_map(|item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(!text_runs.is_empty());
+        assert!(
+            text_runs.iter().all(|text| text.x > 20.0),
+            "relative offset was lost on a continuation page: {text_runs:#?}"
         );
     }
 
