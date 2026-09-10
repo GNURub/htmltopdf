@@ -120,3 +120,17 @@ invalid page counts, and valid/invalid ImageMagick metric output. Running
 without a threshold remains diagnostic only. These stricter checks do not
 establish renderer conformance by themselves, and raster dimensions do not
 verify every PDF page-box property.
+
+## Transforms after a page break
+
+Form controls now capture their paint range after space reservation has selected
+the destination page. A regression test initially reproduced a control moving
+to page two while losing its 20pt translation, then passed after correcting the
+range. The test covers inputs, textarea text and its clip, plus unchanged
+surrounding flow.
+
+Images now apply the existing element-transform path to their paint range,
+including object-fit clipping, after selecting the destination page. A second
+regression test checks translated image/clip coordinates on page two and
+unmodified surrounding text. These are translation/geometry checks, not proof
+of full rotation, skew or multipage transform compatibility.

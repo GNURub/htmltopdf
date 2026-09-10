@@ -1166,6 +1166,8 @@ impl<'a> LayoutContext<'a> {
 
         self.ensure_space(box_height + style.margin_bottom);
         let box_x = self.options.page.margin_left_pt + self.inset_left + style.margin_left;
+        let page_index = self.pages.len().saturating_sub(1);
+        let insert_index = self.pages[page_index].items.len();
         let box_y = self.current_y - box_height;
         let content_x = box_x + style.padding_left;
         let content_y = box_y + style.padding_bottom;
@@ -1213,6 +1215,15 @@ impl<'a> LayoutContext<'a> {
             self.push(LayoutItem::EndClip);
         }
         self.push_container_decoration(box_x, box_y, box_width, box_height, style);
+        self.apply_style_transform_to_range(
+            page_index,
+            insert_index,
+            box_x,
+            box_y,
+            box_width,
+            box_height,
+            style,
+        );
         self.current_y -= box_height + style.margin_bottom;
     }
 
@@ -1221,8 +1232,6 @@ impl<'a> LayoutContext<'a> {
             self.current_y -= style.margin_top;
         }
 
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
         let available_width = (self.options.page.width_pt
             - self.options.page.margin_left_pt
             - self.options.page.margin_right_pt
@@ -1242,6 +1251,8 @@ impl<'a> LayoutContext<'a> {
 
         self.ensure_space(box_height + style.margin_bottom);
         let x = self.options.page.margin_left_pt + self.inset_left + style.margin_left;
+        let page_index = self.pages.len().saturating_sub(1);
+        let insert_index = self.pages[page_index].items.len();
         let y = self.current_y - box_height;
         let disabled = element.attr("disabled").is_some();
         let control_type = form_control_type(element);
@@ -11150,6 +11161,91 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_translation_moves_image_and_clip_on_the_destination_page() {
+        let html = "<body style='margin:0'><div style='height:50pt'>before</div><img src='assets/generic-alpha.png' style='width:60pt;height:40pt;object-fit:cover;transform:translateX(20pt)'><div>after</div></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.base_url = Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        let image = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(image.x, 25.0);
+        let clip = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::BeginClip(clip) => Some(clip),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(clip.x, 25.0);
+        for page in &pages {
+            for item in &page.items {
+                if let LayoutItem::Text(run) = item {
+                    assert_eq!(
+                        run.x, 5.0,
+                        "image translation must not affect surrounding text"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn form_control_transform_targets_its_destination_page() {
+        for control in [
+            "<input value='inside' style='width:60pt;height:40pt;transform:translateX(20pt);background:#0000ff'>",
+            "<textarea style='width:60pt;height:40pt;transform:translateX(20pt);background:#0000ff'>inside</textarea>",
+        ] {
+            let html = format!("<body style='margin:0'><div style='height:50pt'>before</div>{control}<div>after</div></body>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let mut options = RenderOptions::default();
+            options.page = PageOptions { width_pt:150.0, height_pt:80.0,
+                margin_top_pt:5.0, margin_bottom_pt:5.0, margin_left_pt:5.0, margin_right_pt:5.0 };
+            let pages = layout_document(&document, &stylesheet, &options);
+            assert_eq!(pages.len(), 2);
+            let before = pages[0].items.iter().find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "before" => Some(run), _ => None,
+            }).unwrap();
+            assert_eq!(before.x, 5.0);
+            let background = pages[1].items.iter().find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect), _ => None,
+            }).unwrap();
+            assert_eq!(background.x, 25.0, "control must be translated on its new page");
+            for item in &pages[1].items {
+                match item {
+                    LayoutItem::Text(run) if run.text == "inside" => assert_eq!(run.x, 29.0),
+                    LayoutItem::Text(run) if run.text == "after" => assert_eq!(run.x, 5.0),
+                    LayoutItem::BeginClip(clip) => assert_eq!(clip.x, 29.0),
+                    _ => {},
+                }
+            }
+        }
+    }
 
     #[test]
     fn textarea_tabs_advance_to_stops_and_reset_on_each_line() {
