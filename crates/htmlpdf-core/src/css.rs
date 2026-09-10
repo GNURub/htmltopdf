@@ -336,6 +336,7 @@ pub struct ComputedStyle {
     pub font_face: FontFace,
     pub letter_spacing: f32,
     pub word_spacing: f32,
+    pub tab_size: TabSize,
     pub text_decoration: TextDecoration,
     pub text_decoration_color: Option<Color>,
     pub text_decoration_thickness: Option<f32>,
@@ -451,6 +452,7 @@ impl ComputedStyle {
         style.font_face = parent.font_face;
         style.letter_spacing = parent.letter_spacing;
         style.word_spacing = parent.word_spacing;
+        style.tab_size = parent.tab_size;
         style.text_decoration = parent.text_decoration;
         style.text_decoration_color = parent.text_decoration_color;
         style.text_decoration_thickness = parent.text_decoration_thickness;
@@ -1450,6 +1452,20 @@ impl ComputedStyle {
                         self.word_spacing = value;
                     }
                 }
+                "tab-size" => {
+                    if let Ok(number) = value.parse::<f32>() {
+                        if number.is_finite() && number >= 0.0 {
+                            self.tab_size = TabSize::Spaces(number);
+                        }
+                    } else if !value.contains('%') {
+                        if let Some(length) = parse_css_length_with_rem(&value, length_context) {
+                            let points = length.resolve(0.0);
+                            if points.is_finite() && points >= 0.0 {
+                                self.tab_size = TabSize::Points(points);
+                            }
+                        }
+                    }
+                }
                 "text-decoration" | "text-decoration-line" => {
                     if let Some(text_decoration) = parse_text_decoration_line(&value) {
                         self.text_decoration = text_decoration;
@@ -1948,6 +1964,7 @@ impl Default for ComputedStyle {
             font_face: FontFace::Sans,
             letter_spacing: 0.0,
             word_spacing: 0.0,
+            tab_size: TabSize::Spaces(8.0),
             text_decoration: TextDecoration::none(),
             text_decoration_color: None,
             text_decoration_thickness: None,
@@ -2506,6 +2523,12 @@ pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabSize {
+    Spaces(f32),
+    Points(f32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

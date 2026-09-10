@@ -1452,11 +1452,18 @@ impl<'a> LayoutContext<'a> {
             if baseline + style.font_size <= y + bottom {
                 break;
             }
-            if !line.is_empty() {
+            let mut advance = 0.0;
+            for (part_index, part) in line.split('\t').enumerate() {
+                if part_index > 0 {
+                    advance += textarea_tab_advance(style, advance);
+                }
+                if part.is_empty() {
+                    continue;
+                }
                 self.push(LayoutItem::Text(TextRun {
-                    x: x + left,
+                    x: x + left + advance,
                     y: baseline,
-                    text: line,
+                    text: part.to_string(),
                     font_size: style.font_size,
                     color: (if disabled { rgb(0x6b7280) } else { style.color })
                         .with_opacity(style.opacity),
@@ -1472,6 +1479,14 @@ impl<'a> LayoutContext<'a> {
                     rotation_deg: 0.0,
                     text_shadow: style.text_shadow,
                 }));
+                advance += estimate_text_width_with_spacing(
+                    part,
+                    style.font_size,
+                    style.font_face,
+                    style.font_weight,
+                    style.letter_spacing,
+                    style.word_spacing,
+                );
             }
             baseline -= line_height;
         }
@@ -7865,6 +7880,25 @@ fn wrap_textarea_lines(
     wrap_textarea_lines_bounded(text, style, width, no_wrap, usize::MAX)
 }
 
+fn textarea_tab_advance(style: &ComputedStyle, advance: f32) -> f32 {
+    let space = estimate_text_width_with_spacing(
+        " ",
+        style.font_size,
+        style.font_face,
+        style.font_weight,
+        0.0,
+        style.word_spacing,
+    ) + style.letter_spacing;
+    let interval = match style.tab_size {
+        crate::css::TabSize::Spaces(count) => count * space,
+        crate::css::TabSize::Points(points) => points,
+    };
+    if !interval.is_finite() || interval <= 0.0 {
+        return 0.0;
+    }
+    ((advance / interval).floor() + 1.0) * interval - advance
+}
+
 fn wrap_textarea_lines_bounded(
     text: &str,
     style: &ComputedStyle,
@@ -7891,21 +7925,25 @@ fn wrap_textarea_lines_bounded(
         while cursor < hard_line.len() {
             let ch = hard_line[cursor..].chars().next().unwrap();
             let mut buffer = [0; 4];
-            let glyph_width = estimate_text_width_with_spacing(
-                ch.encode_utf8(&mut buffer),
-                style.font_size,
-                style.font_face,
-                style.font_weight,
-                0.0,
-                style.word_spacing,
-            ) + if cursor > start {
-                style.letter_spacing
+            let glyph_width = if ch == '\t' {
+                textarea_tab_advance(style, advance)
             } else {
-                0.0
+                estimate_text_width_with_spacing(
+                    ch.encode_utf8(&mut buffer),
+                    style.font_size,
+                    style.font_face,
+                    style.font_weight,
+                    0.0,
+                    style.word_spacing,
+                ) + if cursor > start && hard_line.as_bytes()[cursor - 1] != b'\t' {
+                    style.letter_spacing
+                } else {
+                    0.0
+                }
             };
             // Preserved trailing spaces can hang past the wrapping edge. A
             // following word starts on the next line without losing them.
-            if ch != ' ' && cursor > start && advance + glyph_width > width {
+            if !matches!(ch, ' ' | '\t') && cursor > start && advance + glyph_width > width {
                 let end = last_break.unwrap_or(cursor);
                 lines.push(hard_line[start..end].to_string());
                 if lines.len() >= max_lines {
@@ -7919,7 +7957,7 @@ fn wrap_textarea_lines_bounded(
             }
             advance += glyph_width;
             cursor += ch.len_utf8();
-            if ch == ' ' {
+            if matches!(ch, ' ' | '\t') {
                 last_break = Some(cursor);
             }
         }
@@ -11112,6 +11150,59 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn textarea_tabs_advance_to_stops_and_reset_on_each_line() {
+        let document = crate::parser::parse_document("<body style='tab-size:30pt'><textarea wrap='off' style='width:180pt;height:80pt;font-size:10pt;line-height:12pt'>a\tb\tc\nd\te</textarea></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b", "c", "d", "e"]
+        );
+        assert!((runs[1].x - runs[0].x - 30.0).abs() < 0.01);
+        assert!((runs[2].x - runs[0].x - 60.0).abs() < 0.01);
+        assert!((runs[4].x - runs[1].x).abs() < 0.01);
+        assert!((runs[0].y - runs[3].y - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn textarea_tabs_affect_soft_wrapping_without_losing_source_text() {
+        let mut style = ComputedStyle::default();
+        style.tab_size = crate::css::TabSize::Points(50.0);
+        assert_eq!(
+            wrap_textarea_lines("a\tb", &style, 40.0, false),
+            vec!["a\t", "b"]
+        );
+        style.tab_size = crate::css::TabSize::Spaces(0.0);
+        assert_eq!(
+            wrap_textarea_lines("a\tb", &style, 40.0, false),
+            vec!["a\tb"]
+        );
+        assert_eq!(textarea_tab_advance(&style, 5.0), 0.0);
+    }
+
+    #[test]
+    fn tab_size_numbers_lengths_inherit_and_invalid_values_are_ignored() {
+        for (value, expected) in [
+            ("4", crate::css::TabSize::Spaces(4.0)),
+            ("12pt", crate::css::TabSize::Points(12.0)),
+        ] {
+            let document = crate::parser::parse_document(&format!("<body style='tab-size:{value}'><textarea style='tab-size:-1;tab-size:20%;tab-size:NaN'>x</textarea></body>")).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let id = document.query_selector("textarea").unwrap();
+            let style = ComputedStyle::for_node(&document, &stylesheet, id);
+            assert_eq!(style.tab_size, expected);
+        }
+    }
 
     #[test]
     fn bounded_textarea_wrapping_keeps_the_same_visible_prefix() {

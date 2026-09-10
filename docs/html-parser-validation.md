@@ -54,7 +54,7 @@ Both PDFs have one page with 667 x 584 pixels without resizing. Normalized RMSE
 is 0.162442; no acceptance threshold was asserted. Multiline content, blank
 lines, indentation, literal markup and no-wrap clipping are visible. Chromium
 also paints native scrollbars, which this engine does not yet implement; their
-space changes wrapping. Native control padding, placeholder appearance, tabs,
+space changes wrapping. Native control padding, placeholder appearance,
 text alignment, Unicode line-breaking rules and exact font metrics still need
 work. This fixture does not prove control or general browser parity.
 
@@ -65,3 +65,13 @@ spaces, Unicode, narrow widths and no-wrap mode; a 100,000-line input checks the
 bounded output count. This bounds the number of generated lines, not all memory
 use: source text, text transformation, and a single very long unwrapped line
 still require separate resource-limit work. No new visual score is claimed.
+
+Preserved textarea tabs now advance to the next stop instead of being passed to
+the PDF writer as control characters. `tab-size` accepts nonnegative numbers
+(multiples of the space advance) and lengths, inherits, and defaults to eight
+spaces. Zero disables the advance; negative, non-finite and percentage values
+are ignored. Wrapping and text-run placement share the stop calculation.
+Three regression tests cover column coordinates, line reset, soft wrapping,
+zero advance, parsing and inheritance. This is geometry validation, not a new
+visual score, and applies to textarea painting rather than all preformatted
+inline contexts. Reference: [CSS tab sizing](https://www.w3.org/TR/css-text-3/#tab-size-property).
