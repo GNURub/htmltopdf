@@ -38,11 +38,22 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             continue;
         }
 
-        let Some(close_rel) = html[open..].find('>') else {
-            push_text(&mut document, *stack.last().unwrap_or(&0), &html[open..]);
+        let tag_start = html.as_bytes().get(open + 1).copied();
+        let valid_start = tag_start
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || matches!(byte, b'!' | b'?'))
+            || (tag_start == Some(b'/')
+                && html
+                    .as_bytes()
+                    .get(open + 2)
+                    .is_some_and(u8::is_ascii_alphabetic));
+        if !valid_start {
+            document.push_text(*stack.last().unwrap_or(&0), "<");
+            cursor = open + 1;
+            continue;
+        }
+        let Some((close, self_closing)) = find_tag_end(html, open + 1) else {
             break;
         };
-        let close = open + close_rel;
         let token = html[open + 1..close].trim();
         cursor = close + 1;
 
@@ -56,21 +67,19 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
                 .next()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            while stack.len() > 1 {
-                let popped = stack.pop().unwrap_or(0);
-                let is_match = match document.node(popped) {
-                    Some(crate::dom::Node::Element(element)) => element.tag == end_tag,
-                    _ => false,
-                };
-                if is_match {
-                    break;
-                }
+            if let Some(index) = stack.iter().rposition(|id| {
+                matches!(document.node(*id), Some(crate::dom::Node::Element(element)) if element.tag == end_tag)
+            }) {
+                stack.truncate(index.max(1));
             }
             continue;
         }
 
-        let self_closing = token.ends_with('/');
-        let token = token.trim_end_matches('/').trim();
+        let token = if self_closing {
+            token.strip_suffix('/').unwrap_or(token).trim_end()
+        } else {
+            token
+        };
         let (tag, attrs) = parse_start_tag(token);
         if tag.is_empty() {
             continue;
@@ -79,12 +88,10 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         let id = document.push_element(parent, tag.clone(), attrs);
 
         if tag == "script" || tag == "style" {
-            let end_marker = format!("</{tag}>");
-            if let Some(end_rel) = html[cursor..].to_ascii_lowercase().find(&end_marker) {
-                let end = cursor + end_rel;
-                document.push_text(id, html[cursor..end].to_string());
-                cursor = end + end_marker.len();
-            }
+            let (end, next) =
+                find_raw_text_end(html, cursor, &tag).unwrap_or((html.len(), html.len()));
+            document.push_text(id, html[cursor..end].to_string());
+            cursor = next;
             continue;
         }
 
@@ -94,6 +101,79 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
     }
 
     Ok(document)
+}
+
+// Only a quote at the beginning of an attribute value opens a quoted
+// value. In particular, '>' inside that value is not a tag terminator.
+fn find_tag_end(html: &str, start: usize) -> Option<(usize, bool)> {
+    enum State {
+        Tag,
+        BeforeValue,
+        Quoted(u8),
+        Unquoted,
+    }
+    let mut state = State::Tag;
+    let mut self_closing = false;
+    for (offset, byte) in html.as_bytes()[start..].iter().copied().enumerate() {
+        match state {
+            State::Quoted(quote) => {
+                if byte == quote {
+                    state = State::Tag;
+                }
+            }
+            State::BeforeValue => {
+                if byte == b'>' {
+                    return Some((start + offset, false));
+                }
+                if byte == b'\'' || byte == b'"' {
+                    state = State::Quoted(byte);
+                } else if !byte.is_ascii_whitespace() {
+                    state = State::Unquoted;
+                }
+            }
+            State::Unquoted => {
+                if byte == b'>' {
+                    return Some((start + offset, false));
+                }
+                if byte.is_ascii_whitespace() {
+                    state = State::Tag;
+                }
+            }
+            State::Tag => {
+                if byte == b'>' {
+                    return Some((start + offset, self_closing));
+                }
+                self_closing = byte == b'/';
+                if byte == b'=' {
+                    state = State::BeforeValue;
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_raw_text_end(html: &str, start: usize, tag: &str) -> Option<(usize, usize)> {
+    let marker = format!("</{tag}");
+    let bytes = html.as_bytes();
+    let mut cursor = start;
+    while let Some(relative) = html[cursor..].find('<') {
+        let open = cursor + relative;
+        let name_end = open + marker.len();
+        if bytes
+            .get(open..name_end)
+            .is_some_and(|name| name.eq_ignore_ascii_case(marker.as_bytes()))
+            && bytes
+                .get(name_end)
+                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(byte, b'>' | b'/'))
+        {
+            if let Some((close, _)) = find_tag_end(html, name_end) {
+                return Some((open, close + 1));
+            }
+        }
+        cursor = open + 1;
+    }
+    None
 }
 
 fn push_text(document: &mut Document, parent: usize, text: &str) {
@@ -166,7 +246,7 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
         }
 
         if !key.is_empty() {
-            attrs.insert(key, value);
+            attrs.entry(key).or_insert(value);
         }
     }
 
@@ -266,6 +346,101 @@ fn decode_codepoint(value: u32) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoted_attribute_values_can_contain_tag_delimiters() {
+        let document = parse_document(r#"<div title="a > b < c" data-label='x > y' data-note="l'été">visible</div><p>after</p>"#).unwrap();
+        let id = document.query_selector("div").unwrap();
+        let Some(crate::dom::Node::Element(element)) = document.node(id) else {
+            panic!("element")
+        };
+        assert_eq!(element.attr("title"), Some("a > b < c"));
+        assert_eq!(element.attr("data-label"), Some("x > y"));
+        assert_eq!(element.attr("data-note"), Some("l'été"));
+        assert_eq!(document.text_content(id), "visible");
+        assert!(document.query_selector("p").is_some());
+    }
+
+    #[test]
+    fn trailing_slash_in_unquoted_value_is_not_self_closing_markup() {
+        let document = parse_document("<div data-url=https://example.test/>inside</div>").unwrap();
+        let id = document.query_selector("div").unwrap();
+        let Some(crate::dom::Node::Element(element)) = document.node(id) else {
+            panic!("element")
+        };
+        assert_eq!(element.attr("data-url"), Some("https://example.test/"));
+        assert_eq!(document.text_content(id), "inside");
+    }
+
+    #[test]
+    fn raw_text_end_tags_allow_whitespace_and_ignore_name_prefixes() {
+        let document =
+            parse_document("<style>.x::before {content:'</stylex>';}</STYLE \n><p>visible</p>")
+                .unwrap();
+        let id = document.query_selector("style").unwrap();
+        let child = document.children(id)[0];
+        assert!(
+            matches!(document.node(child), Some(crate::dom::Node::Text(text)) if text == ".x::before {content:'</stylex>';}" )
+        );
+        assert_eq!(
+            document.text_content(document.query_selector("p").unwrap()),
+            "visible"
+        );
+    }
+
+    #[test]
+    fn unterminated_raw_text_does_not_create_visible_elements() {
+        for tag in ["style", "script"] {
+            let document =
+                parse_document(&format!("<{tag}>ignored <p>not an element</p>")).unwrap();
+            assert!(document.query_selector("p").is_none());
+            let id = document.query_selector(tag).unwrap();
+            assert_eq!(document.children(id).len(), 1);
+        }
+    }
+
+    #[test]
+    fn unmatched_end_tag_does_not_pop_the_open_parent() {
+        let document = parse_document("<div></unknown><span>inside</span></div>").unwrap();
+        let div = document.query_selector("div").unwrap();
+        let span = document.query_selector("span").unwrap();
+        assert_eq!(document.parent_of(span), Some(div));
+    }
+
+    #[test]
+    fn first_duplicate_attribute_wins() {
+        let document = parse_document("<div id=first ID=second></div>").unwrap();
+        assert!(document.query_selector("#first").is_some());
+        assert!(document.query_selector("#second").is_none());
+    }
+
+    #[test]
+    fn less_than_without_a_tag_name_is_text() {
+        let document = parse_document("<p>1 < 2 and 3 > 2</p>").unwrap();
+        let p = document.query_selector("p").unwrap();
+        assert_eq!(document.text_content(p), "1 < 2 and 3 > 2");
+    }
+
+    #[test]
+    fn quote_inside_unquoted_value_does_not_swallow_following_markup() {
+        let document = parse_document("<div title=don't>first</div><p>second</p>").unwrap();
+        let div = document.query_selector("div").unwrap();
+        let Some(crate::dom::Node::Element(element)) = document.node(div) else {
+            panic!("element")
+        };
+        assert_eq!(element.attr("title"), Some("don't"));
+        assert_eq!(
+            document.text_content(document.query_selector("p").unwrap()),
+            "second"
+        );
+    }
+
+    #[test]
+    fn incomplete_quoted_tag_is_not_emitted_as_visible_text() {
+        let document = parse_document("<p>before</p><div title='unterminated > attribute").unwrap();
+        assert!(document.query_selector("div").is_none());
+        assert_eq!(document.text_content(document.root()), "before");
+    }
 
     #[test]
     fn skips_comments_even_when_they_contain_tag_like_text() {
