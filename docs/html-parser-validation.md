@@ -146,3 +146,12 @@ Paragraph closure, formatting-element reconstruction, implied document
 elements, table insertion modes and malformed foreign-content recovery remain
 incomplete. These are DOM-structure tests, not list typography or visual parity
 measurements. Reference: [HTML tree construction](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody).
+
+Paragraphs now close on the relevant HTML block start tags (including another
+paragraph, headings and list items) when a paragraph is in button scope.
+Two structural regressions cover eight block starts, intervening inline nodes,
+list-item transitions and button/table/object scope boundaries. Closure is
+driven by HTML tag semantics, not by the element's CSS display property.
+Foreign namespaces conservatively stop the search. Quirks-dependent table
+start handling, stray paragraph end-tag recovery and active-formatting
+reconstruction remain incomplete; no visual parity result is claimed here.

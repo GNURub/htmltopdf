@@ -157,6 +157,54 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             close_previous_list_item(&document, &mut stack, &namespaces, &tag);
             parent = *stack.last().unwrap_or(&document.root());
         }
+        if namespace == ParsingNamespace::Html
+            && matches!(
+                tag.as_str(),
+                "address"
+                    | "article"
+                    | "aside"
+                    | "blockquote"
+                    | "center"
+                    | "details"
+                    | "dialog"
+                    | "dir"
+                    | "div"
+                    | "dl"
+                    | "fieldset"
+                    | "figcaption"
+                    | "figure"
+                    | "footer"
+                    | "header"
+                    | "hgroup"
+                    | "main"
+                    | "menu"
+                    | "nav"
+                    | "ol"
+                    | "p"
+                    | "search"
+                    | "section"
+                    | "summary"
+                    | "ul"
+                    | "h1"
+                    | "h2"
+                    | "h3"
+                    | "h4"
+                    | "h5"
+                    | "h6"
+                    | "pre"
+                    | "listing"
+                    | "form"
+                    | "li"
+                    | "dt"
+                    | "dd"
+                    | "plaintext"
+                    | "xmp"
+                    | "hr"
+            )
+        {
+            close_paragraph_in_button_scope(&document, &mut stack, &namespaces);
+            parent = *stack.last().unwrap_or(&document.root());
+        }
         let id = document.push_element(parent, tag.clone(), attrs);
         if namespace != ParsingNamespace::Html {
             namespaces.insert(id, namespace);
@@ -196,6 +244,41 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
 
 fn is_html_space(ch: char) -> bool {
     matches!(ch, '\t' | '\n' | '\u{000c}' | '\r' | ' ')
+}
+
+fn close_paragraph_in_button_scope(
+    document: &Document,
+    stack: &mut Vec<crate::dom::NodeId>,
+    namespaces: &BTreeMap<crate::dom::NodeId, ParsingNamespace>,
+) {
+    for index in (1..stack.len()).rev() {
+        let id = stack[index];
+        if namespaces.contains_key(&id) {
+            break;
+        }
+        let Some(crate::dom::Node::Element(element)) = document.node(id) else {
+            continue;
+        };
+        if element.tag == "p" {
+            stack.truncate(index);
+            break;
+        }
+        if matches!(
+            element.tag.as_str(),
+            "applet"
+                | "caption"
+                | "html"
+                | "table"
+                | "td"
+                | "th"
+                | "marquee"
+                | "object"
+                | "template"
+                | "button"
+        ) {
+            break;
+        }
+    }
 }
 
 fn close_previous_list_item(
@@ -566,6 +649,32 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn block_start_tags_close_an_open_paragraph() {
+        for tag in ["p", "div", "section", "ul", "h2", "pre", "hr", "dl"] {
+            let document = parse_document(&format!(
+                "<main><p id='first'>First<span>inline<{tag} id='second'>Second</{tag}></main>"
+            ))
+            .unwrap();
+            assert_parent(&document, "#first", "main");
+            assert_parent(&document, "#second", "main");
+            assert_parent(&document, "span", "#first");
+        }
+    }
+
+    #[test]
+    fn paragraph_closure_respects_scope_boundaries() {
+        for boundary in ["button", "table", "object"] {
+            let document = parse_document(&format!("<main><p id='outer'><{boundary} id='scope'><div id='inner'></div></{boundary}><span id='tail'>tail</span></p></main>")).unwrap();
+            assert_parent(&document, "#inner", "#scope");
+            assert_parent(&document, "#tail", "#outer");
+        }
+        let document =
+            parse_document("<ul id='list'><p id='intro'>Intro<li id='item'>Item</ul>").unwrap();
+        assert_parent(&document, "#intro", "#list");
+        assert_parent(&document, "#item", "#list");
     }
 
     #[test]
