@@ -8420,6 +8420,29 @@ fn parse_named_color(value: &str) -> Option<Color> {
         "wheat" => rgb8(245, 222, 179),
         "yellow" => rgb8(255, 255, 0),
         "yellowgreen" => rgb8(154, 205, 50),
+        "darkkhaki" => rgb8(189, 183, 107),
+        "darkmagenta" => rgb8(139, 0, 139),
+        "darkolivegreen" => rgb8(85, 107, 47),
+        "darkorchid" => rgb8(153, 50, 204),
+        "darksalmon" => rgb8(233, 150, 122),
+        "darkseagreen" => rgb8(143, 188, 143),
+        "darkturquoise" => rgb8(0, 206, 209),
+        "darkviolet" => rgb8(148, 0, 211),
+        "lightseagreen" => rgb8(32, 178, 170),
+        "lightsteelblue" => rgb8(176, 196, 222),
+        "lightyellow" => rgb8(255, 255, 224),
+        "mediumaquamarine" => rgb8(102, 205, 170),
+        "mediumblue" => rgb8(0, 0, 205),
+        "mediumorchid" => rgb8(186, 85, 211),
+        "mediumpurple" => rgb8(147, 112, 219),
+        "mediumseagreen" => rgb8(60, 179, 113),
+        "mediumslateblue" => rgb8(123, 104, 238),
+        "mediumspringgreen" => rgb8(0, 250, 154),
+        "mediumturquoise" => rgb8(72, 209, 204),
+        "mediumvioletred" => rgb8(199, 21, 133),
+        "navajowhite" => rgb8(255, 222, 173),
+        "palevioletred" => rgb8(219, 112, 147),
+        "whitesmoke" => rgb8(245, 245, 245),
         _ => return None,
     })
 }
@@ -10786,6 +10809,27 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn all_standard_named_colors_match_the_reference_table() {
+        let reference = include_str!("../tests/data/css-named-colors.txt");
+        let mut names = BTreeSet::new();
+        for line in reference
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+        {
+            let (name, hex) = line.split_once(' ').unwrap();
+            assert!(names.insert(name), "duplicate {name}");
+            let expected = Color::from_css(hex).unwrap();
+            assert_eq!(Color::from_css(name), Some(expected), "{name}");
+            assert_eq!(
+                Color::from_css(&name.to_ascii_uppercase()),
+                Some(expected),
+                "uppercase {name}"
+            );
+        }
+        assert_eq!(names.len(), 148);
     }
 
     #[test]

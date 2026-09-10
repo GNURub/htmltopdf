@@ -186,3 +186,11 @@ match their sRGB hexadecimal values. Separate exact-value tests cover those
 names. This changes named-color output across CSS and SVG consumers; no new
 visual comparison score is asserted. Deferred currentColor resolution and
 per-side border styles still need further work.
+
+The named-color catalog was subsequently checked against the complete
+[W3C CSS Color 4 table](https://www.w3.org/TR/css-color-4/#named-colors).
+Twenty-three absent names were added. An offline reference fixture contains
+all 148 name/hex pairs, with source and retrieval date; a unit test checks every
+RGB value, uppercase spelling and unique entry count through the runtime color
+parser. This proves the standard named-color lookup, not general color-space,
+compositing or PDF color-management fidelity. No dependency was added.
