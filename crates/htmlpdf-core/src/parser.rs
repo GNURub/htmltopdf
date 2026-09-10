@@ -13,6 +13,15 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         ));
     }
 
+    // HTML input preprocessing normalizes CRLF and bare CR before tokenization.
+    // Avoid allocating a second copy for the common LF-only case.
+    let normalized;
+    let html = if html.contains('\r') {
+        normalized = html.replace("\r\n", "\n").replace('\r', "\n");
+        normalized.as_str()
+    } else {
+        html
+    };
     let mut document = Document::new();
     let mut stack = vec![document.root()];
     let mut cursor = 0;
@@ -87,10 +96,19 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         let parent = *stack.last().unwrap_or(&document.root());
         let id = document.push_element(parent, tag.clone(), attrs);
 
-        if tag == "script" || tag == "style" {
+        if matches!(tag.as_str(), "script" | "style" | "textarea" | "title") {
             let (end, next) =
                 find_raw_text_end(html, cursor, &tag).unwrap_or((html.len(), html.len()));
-            document.push_text(id, html[cursor..end].to_string());
+            let content = &html[cursor..end];
+            let mut text = if tag == "textarea" || tag == "title" {
+                decode_entities(content)
+            } else {
+                content.to_string()
+            };
+            if tag == "textarea" && text.starts_with('\n') {
+                text.remove(0);
+            }
+            document.push_text(id, text);
             cursor = next;
             continue;
         }
@@ -346,6 +364,73 @@ fn decode_codepoint(value: u32) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn element_text_node<'a>(document: &'a Document, tag: &str) -> &'a str {
+        let id = document.query_selector(tag).unwrap();
+        let children = document.children(id);
+        assert_eq!(children.len(), 1);
+        match document.node(children[0]) {
+            Some(crate::dom::Node::Text(text)) => text,
+            _ => panic!("expected a text node"),
+        }
+    }
+
+    #[test]
+    fn rcdata_preserves_markup_as_text_and_decodes_entities_once() {
+        for tag in ["textarea", "title"] {
+            let html = format!(
+                "<{tag}><strong>A &amp; B</strong><!--literal-->&amp;lt;</{tag}><p>after</p>"
+            );
+            let document = parse_document(&html).unwrap();
+            assert!(document.query_selector("strong").is_none());
+            assert_eq!(
+                element_text_node(&document, tag),
+                "<strong>A & B</strong><!--literal-->&lt;"
+            );
+            assert!(document.query_selector("p").is_some());
+        }
+    }
+
+    #[test]
+    fn textarea_ignores_only_the_first_line_feed() {
+        for newline in ["\n", "\r\n", "\r", "&#10;"] {
+            let document =
+                parse_document(&format!("<textarea>{newline}\n  indented\n</textarea>")).unwrap();
+            let expected = if newline == "\r" {
+                "  indented\n"
+            } else {
+                "\n  indented\n"
+            };
+            assert_eq!(element_text_node(&document, "textarea"), expected);
+        }
+        let document = parse_document("<title>\nHeading</title>").unwrap();
+        assert_eq!(element_text_node(&document, "title"), "\nHeading");
+    }
+
+    #[test]
+    fn rcdata_end_tags_match_names_not_prefixes_or_encoded_markup() {
+        let document =
+            parse_document("<textarea></textareax>&lt;/textarea&gt;</TeXtArEa \n><p>after</p>")
+                .unwrap();
+        assert_eq!(
+            element_text_node(&document, "textarea"),
+            "</textareax></textarea>"
+        );
+        assert!(document.query_selector("p").is_some());
+    }
+
+    #[test]
+    fn unterminated_rcdata_consumes_the_remaining_source_as_text() {
+        for tag in ["textarea", "title"] {
+            let document =
+                parse_document(&format!("<{tag}>text <p>not an element</p> &amp;")).unwrap();
+            assert_eq!(
+                element_text_node(&document, tag),
+                "text <p>not an element</p> &"
+            );
+            assert!(document.query_selector("p").is_none());
+        }
+    }
 
     #[test]
     fn quoted_attribute_values_can_contain_tag_delimiters() {
