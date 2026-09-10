@@ -444,8 +444,11 @@ impl<'a> LayoutContext<'a> {
                 }
                 Some(Node::Element(element)) if is_text_aggregation_tag(&element.tag) => {
                     let child_style = self.computed_style(child);
-                    child_style.display != Display::None
-                        && matches!(child_style.display, Display::Inline | Display::InlineFlex)
+                    child_style.display == Display::None
+                        || (child_style.display == Display::Inline
+                            && child_style.float == FloatSide::None
+                            && !is_out_of_flow_position(&child_style)
+                            && self.container_children_are_text_inline(child))
                 }
                 _ => false,
             })
@@ -757,7 +760,11 @@ impl<'a> LayoutContext<'a> {
                         _ => None,
                     })
                     .unwrap_or_default();
-                self.layout_text_block(text, &style);
+                // A text node produces an anonymous box, not another copy of
+                // its parent's dimensions, background or positioning.
+                let mut text_style = ComputedStyle::inherited_from(&style);
+                text_style.transform_rotate_deg = 0.0;
+                self.layout_text_block(text, &text_style);
             }
             Node::Element(element) => {
                 let style = self.computed_style(id);
@@ -859,7 +866,7 @@ impl<'a> LayoutContext<'a> {
                 }
 
                 if self.should_layout_container_as_inline_text(id, &style) {
-                    self.layout_inline_text_block(id, &style);
+                    self.layout_avoid_or_container(id, &style);
                     if style.page_break_after {
                         self.force_page_break();
                     }
@@ -3724,51 +3731,68 @@ impl<'a> LayoutContext<'a> {
         self.float_base_left = float_base_left;
         self.float_base_right = float_base_right;
 
-        self.layout_generated_pseudo(id, style, PseudoElement::Before);
+        let inline_content = self.container_children_are_text_inline(id)
+            && (has_styled_inline_children(self.document, id)
+                || self.has_inline_generated_pseudo(id, style));
         let mut paint_stack_ranges = Vec::new();
         let mut previous_collapsible_margin_bottom: Option<f32> = None;
-        for (source_order, child) in self.document.children(id).iter().copied().enumerate() {
-            let child_style = match self.document.node(child) {
-                Some(Node::Element(_)) => Some(self.computed_style(child)),
-                _ => None,
-            };
-            if let Some(child_style) = child_style.as_ref() {
-                if child_style.float == FloatSide::None
-                    && can_collapse_adjacent_sibling_margin(child_style)
+        if inline_content {
+            // The outer container owns the box model and transforms. Its
+            // inline formatting context only inherits text properties.
+            let mut text_style = ComputedStyle::inherited_from(style);
+            text_style.transform_rotate_deg = 0.0;
+            self.layout_inline_text_block(id, &text_style);
+        } else {
+            self.layout_generated_pseudo(id, style, PseudoElement::Before);
+            for (source_order, child) in self.document.children(id).iter().copied().enumerate() {
+                // Collapsible source whitespace is not an intervening block.
+                if matches!(self.document.node(child), Some(Node::Text(text)) if text.trim().is_empty())
                 {
-                    if let Some(previous_margin_bottom) = previous_collapsible_margin_bottom {
-                        self.current_y +=
-                            previous_margin_bottom.min(child_style.margin_top).max(0.0);
+                    continue;
+                }
+                let child_style = match self.document.node(child) {
+                    Some(Node::Element(_)) => Some(self.computed_style(child)),
+                    _ => None,
+                };
+                if let Some(child_style) = child_style.as_ref() {
+                    if child_style.float == FloatSide::None
+                        && can_collapse_adjacent_sibling_margin(child_style)
+                    {
+                        if let Some(previous_margin_bottom) = previous_collapsible_margin_bottom {
+                            self.current_y +=
+                                previous_margin_bottom.min(child_style.margin_top).max(0.0);
+                        }
                     }
                 }
+                let child_page_index = self.pages.len().saturating_sub(1);
+                let item_start = self.pages[child_page_index].items.len();
+                self.layout_flow_child(child, float_base_left, float_base_right);
+                let item_end = self
+                    .pages
+                    .get(child_page_index)
+                    .map(|page| page.items.len())
+                    .unwrap_or(item_start);
+                if child_page_index == page_index && item_start < item_end {
+                    paint_stack_ranges.push(PaintStackRange {
+                        item_start,
+                        item_end,
+                        z_index: child_style
+                            .as_ref()
+                            .and_then(positioned_z_index)
+                            .unwrap_or(0),
+                        source_order,
+                    });
+                }
+                previous_collapsible_margin_bottom = child_style
+                    .as_ref()
+                    .filter(|style| {
+                        style.float == FloatSide::None
+                            && can_collapse_adjacent_sibling_margin(style)
+                    })
+                    .map(|style| style.margin_bottom.max(0.0));
             }
-            let child_page_index = self.pages.len().saturating_sub(1);
-            let item_start = self.pages[child_page_index].items.len();
-            self.layout_flow_child(child, float_base_left, float_base_right);
-            let item_end = self
-                .pages
-                .get(child_page_index)
-                .map(|page| page.items.len())
-                .unwrap_or(item_start);
-            if child_page_index == page_index && item_start < item_end {
-                paint_stack_ranges.push(PaintStackRange {
-                    item_start,
-                    item_end,
-                    z_index: child_style
-                        .as_ref()
-                        .and_then(positioned_z_index)
-                        .unwrap_or(0),
-                    source_order,
-                });
-            }
-            previous_collapsible_margin_bottom = child_style
-                .as_ref()
-                .filter(|style| {
-                    style.float == FloatSide::None && can_collapse_adjacent_sibling_margin(style)
-                })
-                .map(|style| style.margin_bottom.max(0.0));
+            self.layout_generated_pseudo(id, style, PseudoElement::After);
         }
-        self.layout_generated_pseudo(id, style, PseudoElement::After);
         if paint_stack_ranges.iter().any(|range| range.z_index != 0) {
             reorder_paint_stack_ranges(&mut self.pages[page_index].items, &paint_stack_ranges);
         }
@@ -4174,7 +4198,7 @@ impl<'a> LayoutContext<'a> {
                     font_style: segment.style.font_style,
                     font_face: segment.style.font_face,
                     letter_spacing: segment.style.letter_spacing,
-                    word_spacing: segment.style.word_spacing,
+                    word_spacing: segment.style.word_spacing + extra_word_spacing,
                     text_decoration: segment.style.text_decoration,
                     text_decoration_color: segment.style.text_decoration_color,
                     text_decoration_thickness: segment.style.text_decoration_thickness,
@@ -4497,9 +4521,16 @@ impl<'a> LayoutContext<'a> {
         for child in self.document.children(id).iter().copied() {
             match self.document.node(child) {
                 Some(Node::Text(text)) => {
-                    if !text.trim().is_empty() {
+                    if !text.is_empty() {
                         segments.push(InlineTextSegment {
-                            text: transform_text(text, inherited_style.text_transform),
+                            text: transform_text(
+                                &if inherited_style.white_space == WhiteSpace::PreLine {
+                                    text.clone()
+                                } else {
+                                    text.replace('\n', " ")
+                                },
+                                inherited_style.text_transform,
+                            ),
                             style: inherited_style.clone(),
                         });
                     }
@@ -10655,6 +10686,88 @@ mod tests {
     use super::*;
 
     #[test]
+    fn justified_inline_runs_emit_the_spacing_used_for_placement() {
+        let document = crate::parser::parse_document(
+            "<p style='text-align:justify;text-align-last:justify;width:180pt'>alpha <strong>beta</strong> gamma</p>",
+        ).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert!(runs
+            .iter()
+            .any(|run| run.text == " " && run.word_spacing > 0.0));
+        for pair in runs.windows(2) {
+            let run = pair[0];
+            let painted_width = estimate_text_width_with_spacing(
+                &run.text,
+                run.font_size,
+                run.font_face,
+                run.font_weight,
+                run.letter_spacing,
+                run.word_spacing,
+            );
+            assert!(
+                (run.x + painted_width - pair[1].x).abs() < 0.01,
+                "painted advance must match the next run's position"
+            );
+        }
+    }
+
+    #[test]
+    fn styled_container_text_shares_one_line_and_one_box() {
+        let document = crate::parser::parse_document(
+            r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                div { width: 180pt; padding: 5pt; background: #2563eb;
+                      position: relative; left: 20pt; top: 8pt; }
+            </style>
+            <body><div><span>alpha</span> <strong>beta</strong> gamma</div></body>
+        "#,
+        )
+        .unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 1);
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "alpha beta gamma"
+        );
+        assert!(runs.iter().all(|run| (run.y - runs[0].y).abs() < 0.01));
+        assert!((runs[0].x - options.page.margin_left_pt - 25.0).abs() < 0.01);
+        let backgrounds: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b > 0.7 && rect.color.r < 0.3 => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            backgrounds.len(),
+            1,
+            "only the container paints its background"
+        );
+        assert!((backgrounds[0].height - 22.0).abs() < 0.01);
+    }
+
+    #[test]
     fn floats_wrap_following_text_and_clear_moves_flow_below_float() {
         let html = r#"
             <style>
@@ -11132,15 +11245,15 @@ mod tests {
             .expect("following flow text");
 
         assert!(
-            relative_background.x > 25.0,
+            (relative_background.x - 30.0).abs() < 0.01,
             "left offset was ignored: {relative_background:?}"
         );
         assert!(
-            relative_text.x > 25.0,
+            (relative_text.x - 30.0).abs() < 0.01,
             "text left offset was ignored: {relative_text:?}"
         );
         assert!(
-            relative_text.y < 120.0,
+            (relative_text.y - 110.0).abs() < 0.01,
             "top offset was ignored: {relative_text:?}"
         );
         assert_eq!(
@@ -12274,8 +12387,8 @@ mod tests {
         assert_eq!(text_runs[0].0, "One");
         assert_eq!(text_runs[1].0, "Two");
         assert!(
-            (text_runs[0].1 - text_runs[1].1 - 12.0).abs() < 0.01,
-            "whitespace text nodes between spans must not add an empty line: {text_runs:?}"
+            (text_runs[0].1 - text_runs[1].1).abs() < 0.01,
+            "inline spans separated by collapsible whitespace must share a line: {text_runs:?}"
         );
     }
 

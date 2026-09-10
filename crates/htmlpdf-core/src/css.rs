@@ -435,7 +435,7 @@ impl ComputedStyle {
         style
     }
 
-    fn inherited_from(parent: &Self) -> Self {
+    pub(crate) fn inherited_from(parent: &Self) -> Self {
         let mut style = Self::default();
         style.visibility = parent.visibility;
         style.content = None;
@@ -476,6 +476,31 @@ impl ComputedStyle {
             return;
         }
         let tag = element.tag.as_str();
+        if matches!(
+            tag,
+            "a" | "abbr"
+                | "b"
+                | "cite"
+                | "code"
+                | "dfn"
+                | "em"
+                | "i"
+                | "ins"
+                | "del"
+                | "s"
+                | "strike"
+                | "small"
+                | "span"
+                | "strong"
+                | "sub"
+                | "sup"
+                | "u"
+                | "var"
+                | "mark"
+                | "label"
+        ) {
+            self.display = Display::Inline;
+        }
         match tag {
             "h1" => {
                 self.font_size = 28.0;

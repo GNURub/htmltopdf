@@ -97,7 +97,7 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
 }
 
 fn push_text(document: &mut Document, parent: usize, text: &str) {
-    if text.trim().is_empty() {
+    if text.is_empty() {
         return;
     }
     document.push_text(parent, decode_entities(text));

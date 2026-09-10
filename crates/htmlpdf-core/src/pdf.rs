@@ -210,7 +210,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Sans,
             font_weight: FontWeight::Normal,
             fallback_subtype: "Type1",
-            fallback_base_font: "NotoSans-Regular",
+            fallback_base_font: "Helvetica",
             path_candidates: &[
                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
                 "/home/gnurub/.local/share/fonts/NotoSans-VariableFont_wdth,wght.ttf",
@@ -228,7 +228,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Sans,
             font_weight: FontWeight::Bold,
             fallback_subtype: "Type1",
-            fallback_base_font: "NotoSans-Bold",
+            fallback_base_font: "Helvetica-Bold",
             path_candidates: &[
                 "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
                 "/home/gnurub/.local/share/fonts/NotoSans-VariableFont_wdth,wght.ttf",
@@ -302,7 +302,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Lato,
             font_weight: FontWeight::Normal,
             fallback_subtype: "Type1",
-            fallback_base_font: "Lato-Regular",
+            fallback_base_font: "Helvetica",
             path_candidates: &["/usr/share/fonts/truetype/lato/Lato-Regular.ttf"],
         },
         PdfFontResource {
@@ -316,7 +316,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Lato,
             font_weight: FontWeight::Bold,
             fallback_subtype: "Type1",
-            fallback_base_font: "Lato-Bold",
+            fallback_base_font: "Helvetica-Bold",
             path_candidates: &["/usr/share/fonts/truetype/lato/Lato-Bold.ttf"],
         },
     ]
@@ -1510,6 +1510,32 @@ fn winansi_byte(ch: char) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unembedded_fonts_use_portable_standard_pdf_names() {
+        let expected = [
+            "Helvetica",
+            "Helvetica-Bold",
+            "Times-Roman",
+            "Times-Bold",
+            "Courier",
+            "Courier-Bold",
+            "Helvetica",
+            "Helvetica-Bold",
+        ];
+        for (font, name) in pdf_font_resources().into_iter().zip(expected) {
+            let mut objects = Vec::new();
+            assert!(!push_font_objects(
+                &mut objects,
+                font,
+                &BTreeSet::new(),
+                false
+            ));
+            assert_eq!(objects.len(), 1);
+            let dictionary = String::from_utf8(objects[0].1.clone()).unwrap();
+            assert!(dictionary.contains(&format!("/BaseFont /{name} /Encoding")));
+        }
+    }
 
     #[test]
     fn automatic_font_embedding_only_triggers_outside_winansi() {
