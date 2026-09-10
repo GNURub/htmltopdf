@@ -5214,12 +5214,13 @@ impl<'a> LayoutContext<'a> {
             )
         {
             self.push(LayoutItem::StrokeRect(StrokeRect {
-                x,
-                y,
-                width,
-                height,
+                x: x + top_width / 2.0,
+                y: y + top_width / 2.0,
+                width: (width - top_width).max(0.0),
+                height: (height - top_width).max(0.0),
                 stroke_width: top_width,
-                radius: style.border_radius,
+                radius: (style.border_radius.min(width / 2.0).min(height / 2.0) - top_width / 2.0)
+                    .max(0.0),
                 color: top_color,
                 dash: border_dash(style.border_style, top_width),
             }));
@@ -11286,6 +11287,34 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn rounded_border_stroke_uses_inset_geometry_and_normalized_radius() {
+        for (radius, expected_radius) in [(12.0, 8.0), (100.0, 21.0)] {
+            let document = crate::parser::parse_document(&format!("<body style='margin:0'><div style='box-sizing:border-box;width:100pt;height:50pt;border:8pt solid red;border-radius:{radius}pt'></div></body>")).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let options = RenderOptions::default();
+            let pages = layout_document(&document, &stylesheet, &options);
+            let stroke = pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::StrokeRect(rect) => Some(rect),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(stroke.x, options.page.margin_left_pt + 4.0);
+            assert_eq!(
+                stroke.y,
+                options.page.height_pt - options.page.margin_top_pt - 46.0
+            );
+            assert_eq!(
+                (stroke.width, stroke.height, stroke.stroke_width),
+                (92.0, 42.0, 8.0)
+            );
+            assert_eq!(stroke.radius, expected_radius);
         }
     }
 

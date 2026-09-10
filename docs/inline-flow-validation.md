@@ -239,3 +239,11 @@ asserted. Rounded borders, dashed/dotted corners, extreme overlapping border
 widths and fragmented decorations are not validated by this fixture. The
 existing inline-block fixture was also rechecked at 0.0666196 before this
 border-paint change; it is not a post-change suite-wide parity result.
+
+Uniform rounded-border strokes now inset their path by half the stroke width,
+reduce its dimensions accordingly and derive the centerline radius from the
+normalized outer radius. A regression reproduced the previous 4pt outward
+offset with an 8pt border and verifies both a 12pt radius and an oversized
+100pt radius on a 100 x 50pt box. This is coordinate validation, not a new
+visual score. Unequal rounded borders and cases where border thickness exceeds
+the corner radius still require separate inner/outer contour handling.
