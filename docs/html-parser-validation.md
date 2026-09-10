@@ -163,3 +163,12 @@ head/body/footer transitions and nested tables. This does not implement the
 full table insertion modes: implied tbody/tr creation, foster parenting,
 misplaced table content and recovery around absent row groups remain pending.
 These checks establish parentage, not table layout or pagination fidelity.
+
+Direct table rows/cells now create an implicit `tbody`, and direct cells within
+a row group create an implicit `tr`. Explicit head/body/footer groups are not
+duplicated. New tests cover both implicit levels, explicit groups and CSS
+child-combinator matching through the inserted nodes. The nested-table test
+now checks its inner row through the actual implicit tbody rather than
+assuming a direct table parent. The layout row collector already traverses
+these groups. Foster parenting, implied column groups and misplaced content
+recovery remain incomplete; this is not full HTML table parser conformance.

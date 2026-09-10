@@ -213,6 +213,18 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         {
             close_previous_table_part(&document, &mut stack, &namespaces, &tag);
             parent = *stack.last().unwrap_or(&document.root());
+            if matches!(tag.as_str(), "tr" | "td" | "th")
+                && matches!(document.node(parent), Some(crate::dom::Node::Element(element)) if element.tag == "table")
+            {
+                parent = document.push_element(parent, "tbody".to_string(), BTreeMap::new());
+                stack.push(parent);
+            }
+            if matches!(tag.as_str(), "td" | "th")
+                && matches!(document.node(parent), Some(crate::dom::Node::Element(element)) if matches!(element.tag.as_str(), "tbody" | "thead" | "tfoot"))
+            {
+                parent = document.push_element(parent, "tr".to_string(), BTreeMap::new());
+                stack.push(parent);
+            }
         }
         let id = document.push_element(parent, tag.clone(), attrs);
         if namespace != ParsingNamespace::Html {
@@ -691,6 +703,52 @@ mod tests {
     }
 
     #[test]
+    fn implicit_table_body_and_row_are_created_for_direct_cells() {
+        for contents in ["<td id='a'>A<td id='b'>B", "<tr><td id='a'>A<td id='b'>B"] {
+            let document =
+                parse_document(&format!("<table id='table'>{contents}</table>")).unwrap();
+            let a = document.query_selector("#a").unwrap();
+            let row = document.parent_of(a).unwrap();
+            let body = document.parent_of(row).unwrap();
+            assert!(
+                matches!(document.node(row), Some(crate::dom::Node::Element(element)) if element.tag == "tr")
+            );
+            assert!(
+                matches!(document.node(body), Some(crate::dom::Node::Element(element)) if element.tag == "tbody")
+            );
+            assert_eq!(document.parent_of(body), document.query_selector("#table"));
+            assert_eq!(
+                document.parent_of(document.query_selector("#b").unwrap()),
+                Some(row)
+            );
+            let stylesheet = crate::css::Stylesheet::from_css_chunks(vec![
+                "table > tbody > tr > td { color: #ff0000 } table > tr > td {color:#0000ff}"
+                    .to_string(),
+            ]);
+            let style = crate::css::ComputedStyle::for_node(&document, &stylesheet, a);
+            assert_eq!(
+                (style.color.r, style.color.g, style.color.b),
+                (1.0, 0.0, 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_table_sections_are_not_duplicated() {
+        let document = parse_document("<table id='table'><thead id='head'><th id='heading'>Heading<tbody id='body'><td id='a'>A<tfoot id='foot'><td id='total'>Total</table>").unwrap();
+        for (cell, section) in [("#heading", "#head"), ("#a", "#body"), ("#total", "#foot")] {
+            let row = document
+                .parent_of(document.query_selector(cell).unwrap())
+                .unwrap();
+            assert!(
+                matches!(document.node(row), Some(crate::dom::Node::Element(element)) if element.tag == "tr")
+            );
+            assert_eq!(document.parent_of(row), document.query_selector(section));
+            assert_parent(&document, section, "#table");
+        }
+    }
+
+    #[test]
     fn omitted_table_cell_row_and_section_ends_keep_sibling_structure() {
         let document = parse_document("<table id='table'><thead id='head'><tr id='header'><th id='h1'>A<th id='h2'>B<tbody id='body'><tr id='r1'><td id='a'><span>A<td id='b'>B<tr id='r2'><td id='c'>C<td id='d'>D<tfoot id='foot'><tr id='last'><td id='total'>Total</table>").unwrap();
         for section in ["#head", "#body", "#foot"] {
@@ -717,7 +775,15 @@ mod tests {
     fn inner_table_does_not_close_outer_cells_or_rows() {
         let document = parse_document("<table id='outer'><tr id='outerrow'><td id='outercell'><table id='inner'><tr id='innerrow'><td id='a'>A<td id='b'>B</table><td id='sibling'>Sibling</table>").unwrap();
         assert_parent(&document, "#inner", "#outercell");
-        assert_parent(&document, "#innerrow", "#inner");
+        let inner_row = document.query_selector("#innerrow").unwrap();
+        let inner_body = document.parent_of(inner_row).unwrap();
+        assert!(
+            matches!(document.node(inner_body), Some(crate::dom::Node::Element(element)) if element.tag == "tbody")
+        );
+        assert_eq!(
+            document.parent_of(inner_body),
+            document.query_selector("#inner")
+        );
         assert_parent(&document, "#a", "#innerrow");
         assert_parent(&document, "#b", "#innerrow");
         assert_parent(&document, "#outercell", "#outerrow");
