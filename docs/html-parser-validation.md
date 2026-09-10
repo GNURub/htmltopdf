@@ -155,3 +155,11 @@ driven by HTML tag semantics, not by the element's CSS display property.
 Foreign namespaces conservatively stop the search. Quirks-dependent table
 start handling, stray paragraph end-tag recovery and active-formatting
 reconstruction remain incomplete; no visual parity result is claimed here.
+
+Table start tags now close the preceding cell (`td`/`th`), row (`tr`) or
+explicit row group (`thead`/`tbody`/`tfoot`) within the current table boundary.
+Two structural tests cover omitted cell/row/group ends, inline descendants,
+head/body/footer transitions and nested tables. This does not implement the
+full table insertion modes: implied tbody/tr creation, foster parenting,
+misplaced table content and recovery around absent row groups remain pending.
+These checks establish parentage, not table layout or pagination fidelity.

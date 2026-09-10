@@ -205,6 +205,15 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             close_paragraph_in_button_scope(&document, &mut stack, &namespaces);
             parent = *stack.last().unwrap_or(&document.root());
         }
+        if namespace == ParsingNamespace::Html
+            && matches!(
+                tag.as_str(),
+                "td" | "th" | "tr" | "thead" | "tbody" | "tfoot"
+            )
+        {
+            close_previous_table_part(&document, &mut stack, &namespaces, &tag);
+            parent = *stack.last().unwrap_or(&document.root());
+        }
         let id = document.push_element(parent, tag.clone(), attrs);
         if namespace != ParsingNamespace::Html {
             namespaces.insert(id, namespace);
@@ -244,6 +253,36 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
 
 fn is_html_space(ch: char) -> bool {
     matches!(ch, '\t' | '\n' | '\u{000c}' | '\r' | ' ')
+}
+
+fn close_previous_table_part(
+    document: &Document,
+    stack: &mut Vec<crate::dom::NodeId>,
+    namespaces: &BTreeMap<crate::dom::NodeId, ParsingNamespace>,
+    incoming: &str,
+) {
+    for index in (1..stack.len()).rev() {
+        let id = stack[index];
+        if namespaces.contains_key(&id) {
+            break;
+        }
+        let Some(crate::dom::Node::Element(element)) = document.node(id) else {
+            continue;
+        };
+        let tag = element.tag.as_str();
+        if matches!(tag, "table" | "template" | "html") {
+            break;
+        }
+        let closes = match incoming {
+            "td" | "th" => matches!(tag, "td" | "th"),
+            "tr" => tag == "tr",
+            _ => matches!(tag, "thead" | "tbody" | "tfoot"),
+        };
+        if closes {
+            stack.truncate(index);
+            break;
+        }
+    }
 }
 
 fn close_paragraph_in_button_scope(
@@ -649,6 +688,40 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn omitted_table_cell_row_and_section_ends_keep_sibling_structure() {
+        let document = parse_document("<table id='table'><thead id='head'><tr id='header'><th id='h1'>A<th id='h2'>B<tbody id='body'><tr id='r1'><td id='a'><span>A<td id='b'>B<tr id='r2'><td id='c'>C<td id='d'>D<tfoot id='foot'><tr id='last'><td id='total'>Total</table>").unwrap();
+        for section in ["#head", "#body", "#foot"] {
+            assert_parent(&document, section, "#table");
+        }
+        for cell in ["#h1", "#h2"] {
+            assert_parent(&document, cell, "#header");
+        }
+        for cell in ["#a", "#b"] {
+            assert_parent(&document, cell, "#r1");
+        }
+        for cell in ["#c", "#d"] {
+            assert_parent(&document, cell, "#r2");
+        }
+        for row in ["#r1", "#r2"] {
+            assert_parent(&document, row, "#body");
+        }
+        assert_parent(&document, "#header", "#head");
+        assert_parent(&document, "#last", "#foot");
+        assert_parent(&document, "span", "#a");
+    }
+
+    #[test]
+    fn inner_table_does_not_close_outer_cells_or_rows() {
+        let document = parse_document("<table id='outer'><tr id='outerrow'><td id='outercell'><table id='inner'><tr id='innerrow'><td id='a'>A<td id='b'>B</table><td id='sibling'>Sibling</table>").unwrap();
+        assert_parent(&document, "#inner", "#outercell");
+        assert_parent(&document, "#innerrow", "#inner");
+        assert_parent(&document, "#a", "#innerrow");
+        assert_parent(&document, "#b", "#innerrow");
+        assert_parent(&document, "#outercell", "#outerrow");
+        assert_parent(&document, "#sibling", "#outerrow");
     }
 
     #[test]
