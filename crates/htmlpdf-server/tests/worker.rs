@@ -4,6 +4,10 @@ use std::process::{Command, Stdio};
 #[test]
 fn binary_worker_returns_pdf_and_rejects_invalid_utf8() {
     for (input, valid) in [
+        (
+            b"<link rel=stylesheet href=/etc/passwd><p>blocked</p>".as_slice(),
+            false,
+        ),
         (b"<p>Worker integration</p>".as_slice(), true),
         (b"\xff".as_slice(), false),
     ] {

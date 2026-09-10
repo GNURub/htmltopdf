@@ -17,8 +17,11 @@ pub fn run() -> Result<(), String> {
         return Err("input exceeds limit".into());
     }
     let html = String::from_utf8(input).map_err(|err| err.to_string())?;
-    let pdf =
-        render_html_to_pdf(&html, &RenderOptions::default()).map_err(|err| err.to_string())?;
+    let options = RenderOptions {
+        allow_local_assets: false,
+        ..RenderOptions::default()
+    };
+    let pdf = render_html_to_pdf(&html, &options).map_err(|err| err.to_string())?;
     if pdf.len() > MAX_PDF_BYTES {
         return Err("PDF exceeds limit".into());
     }

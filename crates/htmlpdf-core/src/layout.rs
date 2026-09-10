@@ -5433,6 +5433,9 @@ fn load_image_asset(src: &str, options: &RenderOptions) -> Option<LoadedImage> {
     let data = if src.trim_start().starts_with("data:") {
         decode_data_uri_image(src)?
     } else {
+        if !options.allow_local_assets {
+            return None;
+        }
         std::fs::read(resolve_local_image_asset(options.base_url.as_deref(), src)?).ok()?
     };
     if let Some((width, height)) = jpeg_dimensions(&data) {
@@ -13798,6 +13801,15 @@ Beta</section>
         let stylesheet = Stylesheet::from_document(&document);
         let mut options = RenderOptions::default();
         options.base_url = Some(examples_dir.to_string_lossy().to_string());
+        options.allow_local_assets = false;
+        let blocked = layout_document(&document, &stylesheet, &options);
+        assert!(blocked.iter().all(|page| page
+            .items
+            .iter()
+            .all(|item| !matches!(item, LayoutItem::Image(_)))));
+        let absolute = examples_dir.join("assets/generic-photo.jpg");
+        assert!(load_image_asset(&absolute.to_string_lossy(), &options).is_none());
+        options.allow_local_assets = true;
         let pages = layout_document(&document, &stylesheet, &options);
         let image = pages[0].items.iter().find_map(|item| match item {
             LayoutItem::Image(image) => Some(image),

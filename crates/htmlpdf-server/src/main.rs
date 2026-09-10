@@ -2,6 +2,7 @@ use htmlpdf_core::{render_html_to_pdf, RenderOptions};
 use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 mod worker;
 
@@ -108,9 +109,36 @@ fn run() -> Result<(), String> {
         .unwrap_or_else(|| "127.0.0.1:4000".to_string());
     let listener = TcpListener::bind(&addr).map_err(|err| format!("bind {addr}: {err}"))?;
     println!("htmlpdf-server listening on http://{addr}");
+    let (jobs, receiver) = mpsc::sync_channel::<TcpStream>(8);
+    let receiver = Arc::new(Mutex::new(receiver));
+    for index in 0..2 {
+        let receiver = Arc::clone(&receiver);
+        std::thread::Builder::new()
+            .name(format!("render-handler-{index}"))
+            .spawn(move || loop {
+                let stream = match receiver.lock() {
+                    Ok(receiver) => receiver.recv(),
+                    Err(_) => return,
+                };
+                match stream {
+                    Ok(stream) => handle_client(stream),
+                    Err(_) => return,
+                }
+            })
+            .map_err(|err| format!("start worker: {err}"))?;
+    }
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => handle_client(stream),
+            Ok(stream) => match jobs.try_send(stream) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(mut stream)) => {
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(100)));
+                    write_response(&mut stream, 503, "text/plain", b"render queue is full");
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => {
+                    return Err("render workers unavailable".into())
+                }
+            },
             Err(err) => eprintln!("connection error: {err}"),
         }
     }
@@ -150,6 +178,7 @@ fn write_response(stream: &mut TcpStream, status: u16, content_type: &str, body:
         422 => "Unprocessable Entity",
         431 => "Request Header Fields Too Large",
         504 => "Gateway Timeout",
+        503 => "Service Unavailable",
         _ => "Internal Server Error",
     };
     let header = format!(

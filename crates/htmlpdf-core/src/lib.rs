@@ -23,6 +23,9 @@ pub struct RenderOptions {
     pub js: JsMode,
     pub timeout_ms: u64,
     pub base_url: Option<String>,
+    /// Allow document-selected local stylesheets and images. Disable for HTTP input.
+    /// Built-in font discovery is independent of this policy.
+    pub allow_local_assets: bool,
     pub render_mode: RenderMode,
 }
 
@@ -33,6 +36,7 @@ impl Default for RenderOptions {
             js: JsMode::Limited,
             timeout_ms: 250,
             base_url: None,
+            allow_local_assets: true,
             render_mode: RenderMode::Generic,
         }
     }
@@ -169,6 +173,11 @@ fn load_css_chunks(
             dom::StyleSource::Linked { href, media } => {
                 if !linked_stylesheet_applies_to_print(media.as_deref()) {
                     continue;
+                }
+                if !options.allow_local_assets {
+                    return Err(RenderError::InvalidInput(
+                        "linked stylesheets are disabled for this render".into(),
+                    ));
                 }
                 if let Some(path) = resolve_local_asset(options.base_url.as_deref(), &href) {
                     let css = std::fs::read_to_string(&path).map_err(|err| {

@@ -1,0 +1,31 @@
+[Unit]
+Description=HTMLPDF rendering service
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+ExecStart=/usr/local/bin/htmlpdf-server 127.0.0.1:4000
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=15
+KillMode=control-group
+MemoryMax=1G
+MemorySwapMax=0
+CPUQuota=200%
+TasksMax=32
+LimitCORE=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
