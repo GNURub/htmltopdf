@@ -177,3 +177,12 @@ non-finite and percentage values. Axis pairs reject an invalid component as a
 whole. Logical-to-physical mapping for nondefault writing modes remains
 incomplete, as do border-style-dependent used widths and general `border`
 shorthand resets. These tests validate computed values, not raster parity.
+
+Border colors now expand one through four values, preserving function arguments
+and supporting transparent/currentColor components. Invalid lists and invalid
+physical/logical color longhands preserve previous valid colors. The regression
+also exposed nonstandard basic named colors: red, blue, green and gray/grey now
+match their sRGB hexadecimal values. Separate exact-value tests cover those
+names. This changes named-color output across CSS and SVG consumers; no new
+visual comparison score is asserted. Deferred currentColor resolution and
+per-side border styles still need further work.

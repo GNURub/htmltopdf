@@ -43,27 +43,27 @@ impl Color {
                 a: 0.0,
             }),
             "red" => Some(Self {
-                r: 0.86,
-                g: 0.08,
-                b: 0.08,
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
                 a: 1.0,
             }),
             "green" => Some(Self {
                 r: 0.0,
-                g: 0.5,
+                g: 128.0 / 255.0,
                 b: 0.0,
                 a: 1.0,
             }),
             "blue" => Some(Self {
                 r: 0.0,
-                g: 0.2,
-                b: 0.8,
+                g: 0.0,
+                b: 1.0,
                 a: 1.0,
             }),
             "gray" | "grey" => Some(Self {
-                r: 0.5,
-                g: 0.5,
-                b: 0.5,
+                r: 128.0 / 255.0,
+                g: 128.0 / 255.0,
+                b: 128.0 / 255.0,
                 a: 1.0,
             }),
             "slate" => Some(Self {
@@ -1046,23 +1046,35 @@ impl ComputedStyle {
                     }
                 }
                 "border-color" => {
-                    self.border_color = parse_color_or_current(&value, self.color);
-                    self.border_top_color = self.border_color;
-                    self.border_right_color = self.border_color;
-                    self.border_bottom_color = self.border_color;
-                    self.border_left_color = self.border_color;
+                    if let Some([top, right, bottom, left]) =
+                        parse_border_colors(&value, self.color)
+                    {
+                        self.border_color = Some(top);
+                        self.border_top_color = Some(top);
+                        self.border_right_color = Some(right);
+                        self.border_bottom_color = Some(bottom);
+                        self.border_left_color = Some(left);
+                    }
                 }
                 "border-top-color" | "border-block-start-color" => {
-                    self.border_top_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_top_color = Some(color);
+                    }
                 }
                 "border-right-color" | "border-inline-end-color" => {
-                    self.border_right_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_right_color = Some(color);
+                    }
                 }
                 "border-bottom-color" | "border-block-end-color" => {
-                    self.border_bottom_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_bottom_color = Some(color);
+                    }
                 }
                 "border-left-color" | "border-inline-start-color" => {
-                    self.border_left_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_left_color = Some(color);
+                    }
                 }
                 "border-block-color" => {
                     if let Some((start, end)) = parse_two_value_colors(&value, self.color) {
@@ -7100,6 +7112,20 @@ fn parse_two_value_lengths(
     }
 }
 
+fn parse_border_colors(value: &str, current_color: Color) -> Option<[Color; 4]> {
+    let values = split_css_whitespace(value)
+        .into_iter()
+        .map(|part| parse_color_or_current(&part, current_color))
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
+        _ => None,
+    }
+}
+
 fn parse_two_value_colors(value: &str, current_color: Color) -> Option<(Color, Color)> {
     let values = split_css_whitespace(value)
         .into_iter()
@@ -10760,6 +10786,98 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn basic_named_colors_match_their_srgb_hex_values() {
+        for (name, hex) in [
+            ("red", "#ff0000"),
+            ("blue", "#0000ff"),
+            ("green", "#008000"),
+            ("gray", "#808080"),
+            ("grey", "#808080"),
+        ] {
+            assert_eq!(Color::from_css(name), Color::from_css(hex), "{name}");
+        }
+    }
+
+    #[test]
+    fn invalid_border_color_longhands_preserve_each_side() {
+        let document = parse_document("<div class='target'>box</div>").unwrap();
+        for properties in [
+            [
+                "border-top-color",
+                "border-right-color",
+                "border-bottom-color",
+                "border-left-color",
+            ],
+            [
+                "border-block-start-color",
+                "border-inline-end-color",
+                "border-block-end-color",
+                "border-inline-start-color",
+            ],
+        ] {
+            let invalid = properties
+                .map(|property| format!("{property}:invalid;"))
+                .join("");
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border:2pt solid black;border-color:red blue green white;{invalid}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_color,
+                    style.border_right_color,
+                    style.border_bottom_color,
+                    style.border_left_color
+                ],
+                ["red", "blue", "green", "white"].map(Color::from_css)
+            );
+        }
+    }
+
+    #[test]
+    fn expands_border_color_components_without_losing_previous_valid_colors() {
+        for (value, expected) in [
+            ("red", ["red"; 4]),
+            ("red blue", ["red", "blue", "red", "blue"]),
+            ("red blue green", ["red", "blue", "green", "blue"]),
+            (
+                "red blue green transparent",
+                ["red", "blue", "green", "transparent"],
+            ),
+            (
+                "rgb(255, 0, 0) currentColor",
+                ["red", "purple", "red", "purple"],
+            ),
+            ("red invalid", ["black"; 4]),
+            ("red blue green white black", ["black"; 4]),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{color:purple;border:2pt solid black;border-color:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_color,
+                    style.border_right_color,
+                    style.border_bottom_color,
+                    style.border_left_color
+                ],
+                expected.map(Color::from_css),
+                "{value}"
+            );
+        }
     }
 
     #[test]
