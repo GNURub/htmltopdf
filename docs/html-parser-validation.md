@@ -57,3 +57,11 @@ also paints native scrollbars, which this engine does not yet implement; their
 space changes wrapping. Native control padding, placeholder appearance, tabs,
 text alignment, Unicode line-breaking rules and exact font metrics still need
 work. This fixture does not prove control or general browser parity.
+
+Textarea wrapping now stops after enough lines have been generated to cover the
+visible control height (plus a rounding guard line). It does not build the full
+list of off-screen wrapped lines. Prefix-equivalence tests cover blank lines,
+spaces, Unicode, narrow widths and no-wrap mode; a 100,000-line input checks the
+bounded output count. This bounds the number of generated lines, not all memory
+use: source text, text transformation, and a single very long unwrapped line
+still require separate resource-limit work. No new visual score is claimed.

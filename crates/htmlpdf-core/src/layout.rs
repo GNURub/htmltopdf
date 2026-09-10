@@ -1438,7 +1438,17 @@ impl<'a> LayoutContext<'a> {
         }));
         let mut baseline = y + height - top - style.font_size;
         let transformed = transform_text(text, style.text_transform);
-        for line in wrap_textarea_lines(&transformed, style, content_width, no_wrap) {
+        let line_height = layout_line_height(style).max(0.01);
+        let visible_lines = (content_height / line_height).ceil() as usize;
+        // Include one extra line for floating-point edge rounding; the clip
+        // and baseline check below still determine what is actually painted.
+        for line in wrap_textarea_lines_bounded(
+            &transformed,
+            style,
+            content_width,
+            no_wrap,
+            visible_lines.saturating_add(1),
+        ) {
             if baseline + style.font_size <= y + bottom {
                 break;
             }
@@ -1463,7 +1473,7 @@ impl<'a> LayoutContext<'a> {
                     text_shadow: style.text_shadow,
                 }));
             }
-            baseline -= layout_line_height(style).max(0.01);
+            baseline -= line_height;
         }
         self.push(LayoutItem::EndClip);
     }
@@ -7845,16 +7855,33 @@ fn form_control_box_size(
     (width.max(0.0), height.max(0.0))
 }
 
+#[cfg(test)]
 fn wrap_textarea_lines(
     text: &str,
     style: &ComputedStyle,
     width: f32,
     no_wrap: bool,
 ) -> Vec<String> {
+    wrap_textarea_lines_bounded(text, style, width, no_wrap, usize::MAX)
+}
+
+fn wrap_textarea_lines_bounded(
+    text: &str,
+    style: &ComputedStyle,
+    width: f32,
+    no_wrap: bool,
+    max_lines: usize,
+) -> Vec<String> {
     let mut lines = Vec::new();
+    if max_lines == 0 {
+        return lines;
+    }
     for hard_line in text.split('\n') {
         if no_wrap || hard_line.is_empty() {
             lines.push(hard_line.to_string());
+            if lines.len() >= max_lines {
+                return lines;
+            }
             continue;
         }
         let mut start = 0;
@@ -7881,6 +7908,9 @@ fn wrap_textarea_lines(
             if ch != ' ' && cursor > start && advance + glyph_width > width {
                 let end = last_break.unwrap_or(cursor);
                 lines.push(hard_line[start..end].to_string());
+                if lines.len() >= max_lines {
+                    return lines;
+                }
                 start = end;
                 cursor = end;
                 last_break = None;
@@ -7894,6 +7924,9 @@ fn wrap_textarea_lines(
             }
         }
         lines.push(hard_line[start..].to_string());
+        if lines.len() >= max_lines {
+            return lines;
+        }
     }
     lines
 }
@@ -11079,6 +11112,42 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_textarea_wrapping_keeps_the_same_visible_prefix() {
+        let style = ComputedStyle::default();
+        for text in [
+            "",
+            "\n\n",
+            "alpha  beta\n\n  gamma",
+            "Ωmega longwordwithoutspaces",
+        ] {
+            for width in [1.0, 40.0, 200.0] {
+                for no_wrap in [false, true] {
+                    let full = wrap_textarea_lines(text, &style, width, no_wrap);
+                    for limit in 0..=full.len() + 1 {
+                        assert_eq!(
+                            wrap_textarea_lines_bounded(text, &style, width, no_wrap, limit),
+                            full.iter().take(limit).cloned().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_textarea_builds_only_the_requested_lines() {
+        let style = ComputedStyle::default();
+        let text = "a line of text with several words\n".repeat(100_000);
+        let lines = wrap_textarea_lines_bounded(&text, &style, 40.0, false, 3);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().map(String::len).sum::<usize>() < 100);
+        assert_eq!(
+            wrap_textarea_lines_bounded(&text, &style, 40.0, true, 2).len(),
+            2
+        );
+    }
 
     #[test]
     fn textarea_value_comes_from_untrimmed_child_text_not_value_attribute() {
