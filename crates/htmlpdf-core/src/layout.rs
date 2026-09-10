@@ -3847,7 +3847,11 @@ impl<'a> LayoutContext<'a> {
             self.current_y -= style.margin_top;
         }
 
-        self.ensure_space(first_fragment_min_height(style));
+        let border_top = style.border_top_width.max(style.border_width);
+        let border_bottom = style.border_bottom_width.max(style.border_width);
+        let border_left = style.border_left_width.max(style.border_width);
+        let border_right = style.border_right_width.max(style.border_width);
+        self.ensure_space(first_fragment_min_height(style) + border_top + border_bottom);
 
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
@@ -3871,13 +3875,13 @@ impl<'a> LayoutContext<'a> {
             });
         }
 
-        self.current_y -= style.padding_top;
+        self.current_y -= style.padding_top + border_top;
 
         let previous_left = self.inset_left;
         let previous_right = self.inset_right;
         let trailing_space = containing_width - flow.margin_left - box_width;
-        self.inset_left += flow.margin_left + style.padding_left;
-        self.inset_right += trailing_space + style.padding_right;
+        self.inset_left += flow.margin_left + style.padding_left + border_left;
+        self.inset_right += trailing_space + style.padding_right + border_right;
         let float_base_left = self.inset_left;
         let float_base_right = self.inset_right;
         let previous_float_base_left = self.float_base_left;
@@ -3968,7 +3972,7 @@ impl<'a> LayoutContext<'a> {
         self.float_base_right = previous_float_base_right;
         self.inset_left = previous_left;
         self.inset_right = previous_right;
-        self.current_y -= style.padding_bottom;
+        self.current_y -= style.padding_bottom + border_bottom;
 
         let natural_height = (top_y - self.current_y).max(0.0);
         let height_base = self.options.page.height_pt
@@ -11212,6 +11216,87 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn container_border_insets_content_and_contributes_to_auto_height() {
+        for content in ["inside", "<span>inside</span>", "<div>inside</div>"] {
+            let html = format!("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:2pt solid black'>{content}</div><div>after</div></body>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let options = RenderOptions::default();
+            let pages = layout_document(&document, &stylesheet, &options);
+            let runs: Vec<_> = pages[0]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(run) => Some(run),
+                    _ => None,
+                })
+                .collect();
+            let inside = runs.iter().find(|run| run.text == "inside").unwrap();
+            let after = runs.iter().find(|run| run.text == "after").unwrap();
+            let top = options.page.height_pt - options.page.margin_top_pt;
+            assert_eq!(inside.x, options.page.margin_left_pt + 5.0);
+            assert_eq!(inside.y, top - 5.0 - 10.0);
+            assert_eq!(after.y, top - 22.0 - 10.0);
+        }
+    }
+
+    #[test]
+    fn container_border_and_equivalent_padding_produce_equal_text_geometry() {
+        for sizing in ["content-box", "border-box"] {
+            let mut geometries = Vec::new();
+            for edges in ["border:2pt solid black;padding:3pt", "padding:5pt"] {
+                let html = format!("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='box-sizing:{sizing};width:80pt;{edges}'><div style='width:100%;text-align:right'>right</div><span>words that wrap across several lines inside this box</span></div><div>after</div></body>");
+                let document = crate::parser::parse_document(&html).unwrap();
+                let stylesheet = Stylesheet::from_document(&document);
+                let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+                geometries.push(
+                    pages
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(page, contents)| {
+                            contents.items.iter().filter_map(move |item| match item {
+                                LayoutItem::Text(run) => {
+                                    Some((page, run.text.clone(), run.x, run.y))
+                                }
+                                _ => None,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            assert!(!geometries[0].is_empty());
+            assert_eq!(geometries[0], geometries[1], "{sizing}");
+        }
+    }
+
+    #[test]
+    fn container_reserves_border_before_starting_its_first_line() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='height:49pt'>before</div><div style='border:2pt solid black;padding:3pt'>inside</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        let inside = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "inside" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(inside.x, 10.0);
+        assert_eq!(inside.y, 60.0);
     }
 
     #[test]

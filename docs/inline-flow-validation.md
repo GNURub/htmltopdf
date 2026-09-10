@@ -134,3 +134,19 @@ including object-fit clipping, after selecting the destination page. A second
 regression test checks translated image/clip coordinates on page two and
 unmodified surrounding text. These are translation/geometry checks, not proof
 of full rotation, skew or multipage transform compatibility.
+
+## Borders and ordinary container content
+
+Ordinary block and measured inline-block containers now reserve border widths
+as well as padding around their children. Previously a 2pt border did not inset
+text and was absent from the natural content-driven height. The regression
+test failed before the correction and passes for plain text, inline spans and
+nested blocks. Additional checks compare right-aligned and wrapped text against
+equivalent padding for both box-sizing modes, and verify that first-line page
+reservation includes vertical borders.
+
+This follows the [CSS box model](https://www.w3.org/TR/css-box-3/). These are
+layout-coordinate checks, not a new raster parity score. Independent flex,
+grid, table and control layout paths, border-side zero overrides, positioned
+containing-block edges and fragmented border decoration still need validation
+and corrections; this change does not establish complete box-model parity.
