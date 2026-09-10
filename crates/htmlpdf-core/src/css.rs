@@ -628,9 +628,8 @@ impl ComputedStyle {
                     "inline-flex" => self.display = Display::InlineFlex,
                     "grid" => self.display = Display::Grid,
                     "inline-grid" => self.display = Display::Grid,
-                    "block" | "inline-block" | "flow-root" | "list-item" | "table" => {
-                        self.display = Display::Block
-                    }
+                    "inline-block" => self.display = Display::InlineBlock,
+                    "block" | "flow-root" | "list-item" | "table" => self.display = Display::Block,
                     value if value.contains("flow-root") => self.display = Display::Block,
                     _ => {}
                 },
@@ -2390,6 +2389,7 @@ impl CssLength {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
+    InlineBlock,
     None,
     Block,
     Inline,

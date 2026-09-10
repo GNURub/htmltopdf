@@ -44,6 +44,33 @@ python3 scripts/audit-browser-parity.py examples/generic-inline-flow.html \
 ```
 
 This is not a production-readiness or Chromium-parity claim. Font metrics,
-baselines and rasterization still differ. Atomic `inline-block` layout, mixed
-inline/block children, and comprehensive modern CSS compatibility remain open.
+baselines and rasterization still differ. Mixed inline/block children and
+comprehensive modern CSS compatibility remain open.
 Chromium is used only as a test reference, never by the rendering runtime.
+
+## Atomic inline boxes
+
+`display: inline-block` is now a distinct computed display value. Inline layout
+measures its independent contents into a reusable paint list, retains box width,
+height and baseline, then moves the complete box when wrapping. Line height
+accounts for atomic boxes instead of always using the parent's text line height.
+The measurement context does not clone previously rendered document pages.
+
+Regression tests cover consecutive boxes, complete-box line and page breaks,
+empty boxes, fixed dimensions with content-box padding, minimum dimensions,
+hidden boxes reserving space, and floats contributing to auto height. Related
+fixes correct content-box height constraints and min/max width constraints.
+
+The complete `examples/generic-inline-block.html` fixture was compared with the
+same Chromium headless shell and Poppler process. Both outputs have one page and
+667 x 500 raster dimensions without resizing. Normalized RMSE is 0.0666196.
+Visual review exposed a height/padding defect during development; correcting it
+reduced the metric from 0.0888212. These numbers compare two development versions,
+not the complete patch against its parent commit. The visual fixture covers
+badges, adjacent tiles wrapping to another line, and an empty inline box.
+
+This is initial support, not complete inline formatting conformance. In
+particular, intrinsic sizing still uses approximate text measurements;
+`vertical-align` variants, baseline selection with positioned descendants,
+oversized atomic boxes, nested fixed-position overlays, and full mixed-flow
+layout need further validation and implementation.

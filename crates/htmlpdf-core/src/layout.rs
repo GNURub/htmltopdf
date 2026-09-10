@@ -211,6 +211,7 @@ struct LayoutContext<'a> {
     suppress_positioning: bool,
     suppress_keep_with_next: bool,
     suppress_floats: bool,
+    suppress_pagination: bool,
     floats: Vec<ActiveFloat>,
     float_base_left: f32,
     float_base_right: f32,
@@ -268,6 +269,15 @@ struct PreparedLine {
 struct InlineTextSegment {
     text: String,
     style: ComputedStyle,
+    atomic: Option<std::rc::Rc<InlineAtomicBox>>,
+}
+
+#[derive(Clone)]
+struct InlineAtomicBox {
+    items: Vec<LayoutItem>,
+    width: f32,
+    height: f32,
+    baseline: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -327,6 +337,7 @@ pub fn layout_document(
         suppress_positioning: false,
         suppress_keep_with_next: false,
         suppress_floats: false,
+        suppress_pagination: false,
         floats: Vec::new(),
         float_base_left: 0.0,
         float_base_right: 0.0,
@@ -425,8 +436,19 @@ impl<'a> LayoutContext<'a> {
         style: &ComputedStyle,
     ) -> bool {
         matches!(style.display, Display::Block | Display::Inline)
-            && self.has_inline_generated_pseudo(id, style)
+            && (self.has_inline_generated_pseudo(id, style) || self.has_inline_atomic_child(id))
             && self.container_children_are_text_inline(id)
+    }
+
+    fn has_inline_atomic_child(&mut self, id: NodeId) -> bool {
+        self.document.children(id).iter().copied().any(|child| {
+            matches!(self.document.node(child), Some(Node::Element(_)))
+                && match self.computed_style(child).display {
+                    Display::InlineBlock => true,
+                    Display::Inline => self.has_inline_atomic_child(child),
+                    _ => false,
+                }
+        })
     }
 
     fn container_children_are_text_inline(&mut self, id: NodeId) -> bool {
@@ -442,9 +464,12 @@ impl<'a> LayoutContext<'a> {
                 {
                     true
                 }
-                Some(Node::Element(element)) if is_text_aggregation_tag(&element.tag) => {
+                Some(Node::Element(_)) => {
                     let child_style = self.computed_style(child);
                     child_style.display == Display::None
+                        || (child_style.display == Display::InlineBlock
+                            && child_style.float == FloatSide::None
+                            && !is_out_of_flow_position(&child_style))
                         || (child_style.display == Display::Inline
                             && child_style.float == FloatSide::None
                             && !is_out_of_flow_position(&child_style)
@@ -520,7 +545,16 @@ impl<'a> LayoutContext<'a> {
         self.inset_left = temporary_left;
         self.inset_right = temporary_right;
         self.suppress_floats = true;
-        self.layout_node(id);
+        if matches!(self.document.node(id), Some(Node::Element(element)) if is_text_aggregation_tag(&element.tag))
+        {
+            let snapshot = self.paint_snapshot();
+            self.layout_container(id, style);
+            if style.visibility != Visibility::Visible {
+                self.restore_paint_snapshot(snapshot);
+            }
+        } else {
+            self.layout_node(id);
+        }
         self.suppress_floats = previous_suppress;
         let float_page = self.pages.len().saturating_sub(1);
         let float_bottom = self.current_y;
@@ -616,7 +650,7 @@ impl<'a> LayoutContext<'a> {
         let mut output = Vec::new();
 
         while !remaining.is_empty() {
-            if y < self.options.page.margin_bottom_pt + line_height {
+            if !self.suppress_pagination && y < self.options.page.margin_bottom_pt + line_height {
                 page_index += 1;
                 y = self.options.page.height_pt - self.options.page.margin_top_pt;
             }
@@ -676,7 +710,7 @@ impl<'a> LayoutContext<'a> {
         let mut output = Vec::new();
 
         while cursor < tokens.len() {
-            if y < self.options.page.margin_bottom_pt + line_height {
+            if !self.suppress_pagination && y < self.options.page.margin_bottom_pt + line_height {
                 page_index += 1;
                 y = self.options.page.height_pt - self.options.page.margin_top_pt;
             }
@@ -708,13 +742,23 @@ impl<'a> LayoutContext<'a> {
             if next_cursor <= cursor {
                 break;
             }
+            let (_, actual_height) = inline_line_metrics(&line, style);
+            let page_top = self.options.page.height_pt - self.options.page.margin_top_pt;
+            if !self.suppress_pagination
+                && y < page_top - 0.01
+                && y < self.options.page.margin_bottom_pt + actual_height
+            {
+                page_index += 1;
+                y = page_top;
+                continue;
+            }
             output.push(FlowInlineLine {
                 segments: line,
                 inset_left,
                 available_width,
             });
             cursor = next_cursor;
-            y -= line_height;
+            y -= actual_height;
         }
 
         output
@@ -3733,7 +3777,8 @@ impl<'a> LayoutContext<'a> {
 
         let inline_content = self.container_children_are_text_inline(id)
             && (has_styled_inline_children(self.document, id)
-                || self.has_inline_generated_pseudo(id, style));
+                || self.has_inline_generated_pseudo(id, style)
+                || self.has_inline_atomic_child(id));
         let mut paint_stack_ranges = Vec::new();
         let mut previous_collapsible_margin_bottom: Option<f32> = None;
         if inline_content {
@@ -3800,6 +3845,13 @@ impl<'a> LayoutContext<'a> {
             let _ = self.containing_blocks.pop();
         }
 
+        if style.display == Display::InlineBlock {
+            for float in &self.floats[float_scope_start..] {
+                if float.page_index == self.pages.len().saturating_sub(1) {
+                    self.current_y = self.current_y.min(float.bottom);
+                }
+            }
+        }
         self.floats.truncate(float_scope_start);
         self.float_base_left = previous_float_base_left;
         self.float_base_right = previous_float_base_right;
@@ -4116,7 +4168,10 @@ impl<'a> LayoutContext<'a> {
         let height_base = self.options.page.height_pt
             - self.options.page.margin_top_pt
             - self.options.page.margin_bottom_pt;
-        let mut text_height = layout_line_height * lines.len() as f32;
+        let mut text_height = lines
+            .iter()
+            .map(|line| inline_line_metrics(&line.segments, style).1)
+            .sum();
         let mut resolved_flow_height =
             resolve_box_height(style, available_width, text_height, height_base);
         let mut visible_overflow_capped =
@@ -4142,7 +4197,10 @@ impl<'a> LayoutContext<'a> {
                 .iter()
                 .map(|line| line.available_width)
                 .fold(0.0_f32, f32::max);
-            text_height = layout_line_height * lines.len() as f32;
+            text_height = lines
+                .iter()
+                .map(|line| inline_line_metrics(&line.segments, style).1)
+                .sum();
             resolved_flow_height =
                 resolve_box_height(style, available_width, text_height, height_base);
             visible_overflow_capped =
@@ -4153,6 +4211,16 @@ impl<'a> LayoutContext<'a> {
         let line_count = lines.len();
         for (line_index, line) in lines.into_iter().enumerate() {
             let line_width = inline_segments_width(&line.segments);
+            let (baseline_offset, actual_height) = inline_line_metrics(&line.segments, style);
+            if !visible_overflow_capped {
+                let page_count = self.pages.len();
+                self.ensure_space(actual_height);
+                if line_index == 0 && self.pages.len() != page_count {
+                    page_index = self.pages.len() - 1;
+                    insert_index = self.pages[page_index].items.len();
+                    top_y = self.current_y;
+                }
+            }
             let resolved_align = resolved_line_text_align(style, line_index, line_count);
             let extra_word_spacing = justified_inline_word_spacing(
                 resolved_align,
@@ -4179,6 +4247,17 @@ impl<'a> LayoutContext<'a> {
                 }
             };
             for segment in line.segments {
+                if let Some(atomic) = &segment.atomic {
+                    let mut items = atomic.items.clone();
+                    shift_layout_items(
+                        &mut items,
+                        x,
+                        self.current_y - baseline_offset + atomic.baseline,
+                    );
+                    self.pages.last_mut().unwrap().items.extend(items);
+                    x += atomic.width;
+                    continue;
+                }
                 let segment_width = estimate_text_width_with_spacing(
                     &segment.text,
                     segment.style.font_size,
@@ -4190,7 +4269,7 @@ impl<'a> LayoutContext<'a> {
                 let segment_word_spacing_opportunities = word_spacing_opportunities(&segment.text);
                 self.push(LayoutItem::Text(TextRun {
                     x,
-                    y: self.current_y - style.font_size,
+                    y: self.current_y - baseline_offset,
                     text: segment.text,
                     font_size: segment.style.font_size,
                     color: segment.style.color.with_opacity(segment.style.opacity),
@@ -4208,10 +4287,7 @@ impl<'a> LayoutContext<'a> {
                 }));
                 x += segment_width + extra_word_spacing * segment_word_spacing_opportunities as f32;
             }
-            self.current_y -= layout_line_height;
-            if line_index + 1 < line_count && !visible_overflow_capped {
-                self.ensure_space(layout_line_height);
-            }
+            self.current_y -= actual_height;
         }
 
         let height = (top_y - self.current_y).max(0.0);
@@ -4510,6 +4586,102 @@ impl<'a> LayoutContext<'a> {
         }
     }
 
+    fn measure_inline_atomic_box(&mut self, id: NodeId, style: &ComputedStyle) -> InlineAtomicBox {
+        let available = (self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt
+            - self.inset_left
+            - self.inset_right)
+            .max(0.0);
+        let mut box_style = style.clone();
+        let mut width = if style.width.is_some() {
+            resolve_flow_horizontal_geometry(style, available).box_width
+        } else {
+            (self.intrinsic_inline_width(id, available) - style.margin_left - style.margin_right)
+                .max(0.0)
+        };
+        if style.width.is_none() {
+            let mut constrained = style.clone();
+            constrained.width = Some(crate::css::CssLength::Linear {
+                percent: 0.0,
+                points: if style.box_sizing == BoxSizing::BorderBox {
+                    width
+                } else {
+                    (width - horizontal_box_extras(style)).max(0.0)
+                },
+            });
+            width = resolve_flow_horizontal_geometry(&constrained, available).box_width;
+        }
+        // Resolve percentages against the containing block before creating the
+        // independent formatting context. Keep the measured border box fixed.
+        box_style.width = Some(crate::css::CssLength::Linear {
+            percent: 0.0,
+            points: if style.box_sizing == BoxSizing::BorderBox {
+                width
+            } else {
+                (width - horizontal_box_extras(style)).max(0.0)
+            },
+        });
+        box_style.min_width = None;
+        box_style.max_width = None;
+        let outer_width = width + style.margin_left + style.margin_right;
+        let top = self.options.page.height_pt - self.options.page.margin_top_pt;
+        let inset_right = self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt
+            - outer_width;
+        // Do not clone already rendered document pages for every inline box.
+        let mut probe = LayoutContext {
+            document: self.document,
+            stylesheet: self.stylesheet,
+            options: self.options,
+            pages: vec![LayoutPage {
+                number: 1,
+                page: self.options.page,
+                items: Vec::new(),
+            }],
+            current_y: top,
+            inset_left: 0.0,
+            inset_right,
+            float_base_left: 0.0,
+            float_base_right: inset_right,
+            containing_blocks: Vec::new(),
+            floats: Vec::new(),
+            fixed_overlays: Vec::new(),
+            suppress_positioning: false,
+            suppress_floats: false,
+            suppress_pagination: true,
+            suppress_keep_with_next: true,
+            style_cache: self.style_cache.clone(),
+        };
+        probe.style_cache.insert(id, box_style.clone());
+        probe.layout_container(id, &box_style);
+        let height = (top - probe.current_y).max(0.0);
+        let mut items = std::mem::take(&mut probe.pages[0].items);
+        let baseline = if style.overflow_hidden {
+            height
+        } else {
+            items
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    LayoutItem::Text(run) => Some(top - run.y),
+                    _ => None,
+                })
+                .unwrap_or(height)
+        };
+        shift_layout_items(&mut items, -self.options.page.margin_left_pt, -top);
+        if style.visibility != Visibility::Visible {
+            items.clear();
+        }
+        InlineAtomicBox {
+            items,
+            width: outer_width,
+            height,
+            baseline,
+        }
+    }
+
     fn collect_inline_text_segments(
         &mut self,
         id: NodeId,
@@ -4523,6 +4695,7 @@ impl<'a> LayoutContext<'a> {
                 Some(Node::Text(text)) => {
                     if !text.is_empty() {
                         segments.push(InlineTextSegment {
+                            atomic: None,
                             text: transform_text(
                                 &if inherited_style.white_space == WhiteSpace::PreLine {
                                     text.clone()
@@ -4537,6 +4710,7 @@ impl<'a> LayoutContext<'a> {
                 }
                 Some(Node::Element(element)) if element.tag == "br" => {
                     segments.push(InlineTextSegment {
+                        atomic: None,
                         text: "\n".to_string(),
                         style: self.computed_style(child),
                     });
@@ -4548,10 +4722,20 @@ impl<'a> LayoutContext<'a> {
                     if child_style.display == Display::None {
                         continue;
                     }
+                    if child_style.display == Display::InlineBlock {
+                        let atomic = self.measure_inline_atomic_box(child, &child_style);
+                        segments.push(InlineTextSegment {
+                            text: String::new(),
+                            style: child_style,
+                            atomic: Some(std::rc::Rc::new(atomic)),
+                        });
+                        continue;
+                    }
                     if self.document.children(child).is_empty() {
                         let text = self.document.text_content(child);
                         if !text.trim().is_empty() {
                             segments.push(InlineTextSegment {
+                                atomic: None,
                                 text: transform_text(&text, child_style.text_transform),
                                 style: child_style,
                             });
@@ -4586,6 +4770,7 @@ impl<'a> LayoutContext<'a> {
             ListStyleType::None => return,
         };
         segments.push(InlineTextSegment {
+            atomic: None,
             text: marker,
             style: style.clone(),
         });
@@ -4608,6 +4793,7 @@ impl<'a> LayoutContext<'a> {
             return;
         }
         segments.push(InlineTextSegment {
+            atomic: None,
             text: transform_text(&content, style.text_transform),
             style,
         });
@@ -4789,6 +4975,9 @@ impl<'a> LayoutContext<'a> {
     }
 
     fn start_new_page(&mut self) {
+        if self.suppress_pagination {
+            return;
+        }
         let number = self.pages.len() + 1;
         self.pages.push(LayoutPage {
             number,
@@ -5411,11 +5600,16 @@ fn resolve_flow_box_width(
             }
         })
         .unwrap_or(available_width);
-    if let Some(min_width) = &style.min_width {
-        width = width.max(min_width.resolve(containing_width));
-    }
+    let extras = if style.box_sizing == BoxSizing::ContentBox {
+        horizontal_box_extras(style)
+    } else {
+        0.0
+    };
     if let Some(max_width) = &style.max_width {
-        width = width.min(max_width.resolve(containing_width));
+        width = width.min(max_width.resolve(containing_width) + extras);
+    }
+    if let Some(min_width) = &style.min_width {
+        width = width.max(min_width.resolve(containing_width) + extras);
     }
     width.max(0.0)
 }
@@ -5426,20 +5620,28 @@ fn resolve_box_height(
     natural_height: f32,
     height_base: f32,
 ) -> f32 {
+    let extras = if style.box_sizing == BoxSizing::ContentBox {
+        style.padding_top
+            + style.padding_bottom
+            + style.border_top_width.max(style.border_width)
+            + style.border_bottom_width.max(style.border_width)
+    } else {
+        0.0
+    };
     let min_height = style
         .min_height
         .as_ref()
-        .map(|height| height.resolve(height_base))
+        .map(|height| height.resolve(height_base) + extras)
         .unwrap_or(0.0);
     let mut resolved = if let Some(height) = &style.height {
-        height.resolve(height_base).max(min_height)
+        (height.resolve(height_base) + extras).max(min_height)
     } else if let Some(ratio) = style.aspect_ratio {
         natural_height.max(box_width / ratio).max(min_height)
     } else {
         natural_height.max(min_height)
     };
     if let Some(max_height) = &style.max_height {
-        resolved = resolved.min(max_height.resolve(height_base).max(min_height));
+        resolved = resolved.min((max_height.resolve(height_base) + extras).max(min_height));
     }
     resolved
 }
@@ -7943,6 +8145,18 @@ fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSeg
     let mut pending_space = false;
 
     for segment in segments {
+        if segment.atomic.is_some() {
+            if pending_space && !tokens.is_empty() {
+                tokens.push(InlineTextSegment {
+                    text: " ".into(),
+                    style: segment.style.clone(),
+                    atomic: None,
+                });
+            }
+            tokens.push(segment.clone());
+            pending_space = false;
+            continue;
+        }
         if segment.text == "\n" {
             tokens.push(segment.clone());
             pending_space = false;
@@ -7954,6 +8168,7 @@ fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSeg
             if character == '\n' && segment.style.white_space == WhiteSpace::PreLine {
                 push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
                 tokens.push(InlineTextSegment {
+                    atomic: None,
                     text: "\n".to_string(),
                     style: segment.style.clone(),
                 });
@@ -7968,6 +8183,7 @@ fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSeg
                         .is_some_and(|token: &InlineTextSegment| token.text == "\n")
                     {
                         tokens.push(InlineTextSegment {
+                            atomic: None,
                             text: " ".to_string(),
                             style: segment.style.clone(),
                         });
@@ -7999,11 +8215,13 @@ fn push_inline_word(
             .is_some_and(|token: &InlineTextSegment| token.text == "\n")
     {
         tokens.push(InlineTextSegment {
+            atomic: None,
             text: " ".to_string(),
             style: style.clone(),
         });
     }
     tokens.push(InlineTextSegment {
+        atomic: None,
         text: std::mem::take(word),
         style: style.clone(),
     });
@@ -8038,7 +8256,9 @@ fn wrap_one_inline_line(
         // complete word, which may span several differently styled runs,
         // before deciding whether to move it to the next line.
         let mut word_end = cursor + 1;
-        while word_end < tokens.len()
+        while token.atomic.is_none()
+            && word_end < tokens.len()
+            && tokens[word_end].atomic.is_none()
             && tokens[word_end].text != " "
             && tokens[word_end].text != "\n"
         {
@@ -8075,6 +8295,9 @@ fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f
     segments
         .iter()
         .map(|segment| {
+            if let Some(atomic) = &segment.atomic {
+                return atomic.width;
+            }
             estimate_wrap_text_width_with_spacing(
                 &segment.text,
                 segment.style.font_size,
@@ -8088,10 +8311,25 @@ fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f
         .sum()
 }
 
+fn inline_line_metrics(segments: &[InlineTextSegment], style: &ComputedStyle) -> (f32, f32) {
+    let mut ascent = style.font_size;
+    let mut descent = (layout_line_height(style) - ascent).max(0.0);
+    for segment in segments {
+        if let Some(atomic) = &segment.atomic {
+            ascent = ascent.max(atomic.baseline);
+            descent = descent.max(atomic.height - atomic.baseline);
+        }
+    }
+    (ascent, ascent + descent)
+}
+
 fn inline_segments_width(segments: &[InlineTextSegment]) -> f32 {
     segments
         .iter()
         .map(|segment| {
+            if let Some(atomic) = &segment.atomic {
+                return atomic.width;
+            }
             estimate_text_width_with_spacing(
                 &segment.text,
                 segment.style.font_size,
@@ -10705,20 +10943,162 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inline_block_contains_floats_in_its_auto_height() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;width:60pt;background:#0000ff'><span style='float:left;width:20pt;height:30pt;background:#ff0000'></span></span>after</p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.height, 30.0);
+    }
+
+    #[test]
+    fn inline_block_minimum_size_and_hidden_box_reserve_space() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;min-width:50pt;min-height:20pt;padding:2pt;background:#0000ff'>one</span><span style='display:inline-block;visibility:hidden;width:30pt'>secret</span>after</p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((rect.width, rect.height), (54.0, 24.0));
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert!(!runs.iter().any(|run| run.text.contains("secret")));
+        let after = runs.iter().find(|run| run.text == "after").unwrap();
+        assert!((after.x - options.page.margin_left_pt - 84.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inline_block_content_box_height_includes_padding() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;width:60pt;height:28pt;padding:4pt;background:#0000ff'>tile</span></p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.width, 68.0);
+        assert_eq!(rect.height, 36.0);
+    }
+
+    #[test]
+    fn inline_blocks_keep_boxes_and_wrap_as_atomic_items() {
+        let html = "<body style='margin:0;font-size:10pt;line-height:12pt'>\
+            <div style='width:100pt'><span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>one</span>\
+            <span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>two</span>\
+            <span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>three</span></div></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let boxes: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(boxes.len(), 3);
+        assert!((boxes[1].x - boxes[0].x - 40.0).abs() < 0.01);
+        assert!((boxes[1].y - boxes[0].y).abs() < 0.01);
+        assert!((boxes[2].x - boxes[0].x).abs() < 0.01);
+        assert!((boxes[0].y - boxes[2].y - 20.0).abs() < 0.01);
+        assert!(boxes
+            .iter()
+            .all(|rect| (rect.width - 40.0).abs() < 0.01 && (rect.height - 20.0).abs() < 0.01));
+        let text: String = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "onetwothree");
+    }
+
+    #[test]
+    fn empty_inline_block_keeps_its_dimensions_and_moves_whole_to_next_page() {
+        let html = "<body style='margin:0'><div style='height:50pt'>before</div>\
+            <p style='margin:0'><span style='display:inline-block;width:30pt;height:40pt;background:#0000ff'></span>after</p></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        assert!(!pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0)));
+        let rect = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.width, 30.0);
+        assert_eq!(rect.height, 40.0);
+        let after = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert!((after.x - 35.0).abs() < 0.01);
+    }
+
+    #[test]
     fn inline_style_boundaries_do_not_split_words() {
         let normal = ComputedStyle::default();
         let mut bold = normal.clone();
         bold.font_weight = FontWeight::Bold;
         let tokens = tokenize_inline_segments(&[
             InlineTextSegment {
+                atomic: None,
                 text: "lead ab".into(),
                 style: normal.clone(),
             },
             InlineTextSegment {
+                atomic: None,
                 text: "cdef".into(),
                 style: bold,
             },
             InlineTextSegment {
+                atomic: None,
                 text: " tail".into(),
                 style: normal,
             },
@@ -10757,6 +11137,7 @@ mod tests {
         for separator in ['\u{00a0}', '\u{202f}'] {
             let text = format!("alpha{separator}beta");
             let tokens = tokenize_inline_segments(&[InlineTextSegment {
+                atomic: None,
                 text: text.clone(),
                 style: style.clone(),
             }]);
