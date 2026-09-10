@@ -100,3 +100,13 @@ Two structural tests cover slash/attribute variants, case folding, form feed,
 Unicode lookalikes and following-sibling parentage. This is not complete HTML
 tokenizer conformance: start-tag/attribute whitespace handling and malformed
 tree-construction recovery still require further work.
+
+Start-tag name and attribute parsing now share HTML whitespace boundaries too.
+A slash separates the tag name and attributes, or successive attribute names,
+without truncating an unquoted URL value. Unicode whitespace and vertical tab
+remain part of names/values instead of being silently trimmed or split.
+Tag-boundary scanning, self-closing cleanup and raw-text end detection use the
+same whitespace predicate. Two regressions cover attribute slash recovery,
+URL preservation, child parentage and non-HTML whitespace in names and values.
+These corrections still do not provide the complete HTML tokenizer or tree
+construction algorithm.

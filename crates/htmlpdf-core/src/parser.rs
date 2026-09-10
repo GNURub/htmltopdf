@@ -131,7 +131,10 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         }
 
         let token = if self_closing {
-            token.strip_suffix('/').unwrap_or(token).trim_end()
+            token
+                .strip_suffix('/')
+                .unwrap_or(token)
+                .trim_end_matches(is_html_space)
         } else {
             token
         };
@@ -213,7 +216,7 @@ fn find_tag_end(html: &str, start: usize) -> Option<(usize, bool)> {
                 }
                 if byte == b'\'' || byte == b'"' {
                     state = State::Quoted(byte);
-                } else if !byte.is_ascii_whitespace() {
+                } else if !is_html_space(byte as char) {
                     state = State::Unquoted;
                 }
             }
@@ -221,7 +224,7 @@ fn find_tag_end(html: &str, start: usize) -> Option<(usize, bool)> {
                 if byte == b'>' {
                     return Some((start + offset, false));
                 }
-                if byte.is_ascii_whitespace() {
+                if is_html_space(byte as char) {
                     state = State::Tag;
                 }
             }
@@ -251,7 +254,7 @@ fn find_raw_text_end(html: &str, start: usize, tag: &str) -> Option<(usize, usiz
             .is_some_and(|name| name.eq_ignore_ascii_case(marker.as_bytes()))
             && bytes
                 .get(name_end)
-                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(byte, b'>' | b'/'))
+                .is_some_and(|byte| is_html_space(*byte as char) || matches!(byte, b'>' | b'/'))
         {
             if let Some((close, _)) = find_tag_end(html, name_end) {
                 return Some((open, close + 1));
@@ -270,18 +273,13 @@ fn push_text(document: &mut Document, parent: usize, text: &str) {
 }
 
 fn parse_start_tag(token: &str) -> (String, BTreeMap<String, String>) {
-    let mut chars = token.chars().peekable();
-    let mut tag = String::new();
-    while let Some(ch) = chars.peek().copied() {
-        if ch.is_whitespace() {
-            break;
-        }
-        tag.push(ch.to_ascii_lowercase());
-        let _ = chars.next();
-    }
-
-    let rest: String = chars.collect();
-    (tag, parse_attrs(&rest))
+    let end = token
+        .find(|ch| is_html_space(ch) || ch == '/')
+        .unwrap_or(token.len());
+    (
+        token[..end].to_ascii_lowercase(),
+        parse_attrs(&token[end..]),
+    )
 }
 
 fn parse_attrs(input: &str) -> BTreeMap<String, String> {
@@ -290,25 +288,28 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
     let mut i = 0;
 
     while i < bytes.len() {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        while i < bytes.len() && (is_html_space(bytes[i] as char) || bytes[i] == b'/') {
             i += 1;
         }
         if i >= bytes.len() {
             break;
         }
         let key_start = i;
-        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'=' {
+        while i < bytes.len()
+            && !is_html_space(bytes[i] as char)
+            && !matches!(bytes[i], b'=' | b'/')
+        {
             i += 1;
         }
-        let key = input[key_start..i].trim().to_ascii_lowercase();
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        let key = input[key_start..i].to_ascii_lowercase();
+        while i < bytes.len() && is_html_space(bytes[i] as char) {
             i += 1;
         }
 
         let mut value = String::new();
         if i < bytes.len() && bytes[i] == b'=' {
             i += 1;
-            while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            while i < bytes.len() && is_html_space(bytes[i] as char) {
                 i += 1;
             }
             if i < bytes.len() && (bytes[i] == b'"' || bytes[i] == b'\'') {
@@ -324,7 +325,7 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
                 }
             } else {
                 let value_start = i;
-                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                while i < bytes.len() && !is_html_space(bytes[i] as char) {
                     i += 1;
                 }
                 value = decode_entities(&input[value_start..i]);
@@ -439,6 +440,39 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn start_tag_slashes_delimit_attributes_but_not_unquoted_values() {
+        let document = parse_document("<main><div/class='card'/id='box'><span>inside</span></div><a href=https://example.org/a/b/>link</a></main>").unwrap();
+        assert_parent(&document, "span", "div");
+        let Some(crate::dom::Node::Element(div)) =
+            document.node(document.query_selector("div").unwrap())
+        else {
+            panic!("div missing");
+        };
+        assert_eq!(div.attr("class"), Some("card"));
+        assert_eq!(div.attr("id"), Some("box"));
+        let Some(crate::dom::Node::Element(link)) =
+            document.node(document.query_selector("a").unwrap())
+        else {
+            panic!("link missing");
+        };
+        assert_eq!(link.attr("href"), Some("https://example.org/a/b/"));
+    }
+
+    #[test]
+    fn non_html_whitespace_is_preserved_in_tag_and_attribute_names() {
+        for space in ['\u{00a0}', '\u{2003}', '\u{000b}'] {
+            let (tag, attrs) =
+                parse_start_tag(&format!("div{space}x data{space}='value' title=a{space}b"));
+            assert_eq!(tag, format!("div{space}x"));
+            assert_eq!(
+                attrs.get(&format!("data{space}")).map(String::as_str),
+                Some("value")
+            );
+            assert_eq!(attrs.get("title"), Some(&format!("a{space}b")));
+        }
     }
 
     #[test]
