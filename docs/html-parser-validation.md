@@ -75,3 +75,19 @@ Three regression tests cover column coordinates, line reset, soft wrapping,
 zero advance, parsing and inheritance. This is geometry validation, not a new
 visual score, and applies to textarea painting rather than all preformatted
 inline contexts. Reference: [CSS tab sizing](https://www.w3.org/TR/css-text-3/#tab-size-property).
+
+### HTML versus foreign-content self-closing tags
+
+Trailing `/>` no longer closes ordinary non-void HTML elements. HTML void
+elements still close immediately, while SVG and MathML retain self-closing
+behavior. Parser-local namespace tracking handles SVG `foreignObject`, `desc`
+and `title`, MathML text integration points (with `mglyph`/`malignmark`
+exceptions), and HTML-encoded `annotation-xml`. SVG `title` is no longer
+consumed as HTML RCDATA. Four structural regression tests cover these cases,
+including nested SVG and following siblings. No runtime dependency was added.
+
+This is not a full HTML tree-construction implementation: foreign-content
+breakout rules, implied elements/end tags, adoption-agency handling and
+namespace-aware DOM consumers remain incomplete. The checks establish tree
+relationships, not browser visual parity. Reference:
+[WHATWG HTML parsing](https://html.spec.whatwg.org/multipage/parsing.html).

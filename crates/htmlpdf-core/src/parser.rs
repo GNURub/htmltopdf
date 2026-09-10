@@ -6,6 +6,51 @@ const VOID_TAGS: &[&str] = &[
     "wbr",
 ];
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ParsingNamespace {
+    Html,
+    Svg,
+    MathMl,
+}
+
+fn child_namespace(
+    namespace: ParsingNamespace,
+    parent: Option<&crate::dom::Node>,
+    tag: &str,
+) -> ParsingNamespace {
+    let mut html_context = namespace == ParsingNamespace::Html;
+    if let Some(crate::dom::Node::Element(element)) = parent {
+        html_context |= match namespace {
+            ParsingNamespace::Svg => {
+                matches!(element.tag.as_str(), "foreignobject" | "desc" | "title")
+            }
+            ParsingNamespace::MathMl => {
+                (matches!(element.tag.as_str(), "mi" | "mo" | "mn" | "ms" | "mtext")
+                    && !matches!(tag, "mglyph" | "malignmark"))
+                    || (element.tag == "annotation-xml"
+                        && element.attr("encoding").is_some_and(|encoding| {
+                            encoding.eq_ignore_ascii_case("text/html")
+                                || encoding.eq_ignore_ascii_case("application/xhtml+xml")
+                        }))
+            }
+            ParsingNamespace::Html => true,
+        };
+        if namespace == ParsingNamespace::MathMl && element.tag == "annotation-xml" && tag == "svg"
+        {
+            return ParsingNamespace::Svg;
+        }
+    }
+    if html_context {
+        match tag {
+            "svg" => ParsingNamespace::Svg,
+            "math" => ParsingNamespace::MathMl,
+            _ => ParsingNamespace::Html,
+        }
+    } else {
+        namespace
+    }
+}
+
 pub fn parse_document(html: &str) -> Result<Document, RenderError> {
     if html.trim().is_empty() {
         return Err(RenderError::InvalidInput(
@@ -24,6 +69,7 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
     };
     let mut document = Document::new();
     let mut stack = vec![document.root()];
+    let mut namespaces = BTreeMap::new();
     let mut cursor = 0;
 
     while cursor < html.len() {
@@ -94,9 +140,22 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             continue;
         }
         let parent = *stack.last().unwrap_or(&document.root());
+        let namespace = child_namespace(
+            namespaces
+                .get(&parent)
+                .copied()
+                .unwrap_or(ParsingNamespace::Html),
+            document.node(parent),
+            &tag,
+        );
         let id = document.push_element(parent, tag.clone(), attrs);
+        if namespace != ParsingNamespace::Html {
+            namespaces.insert(id, namespace);
+        }
 
-        if matches!(tag.as_str(), "script" | "style" | "textarea" | "title") {
+        if namespace == ParsingNamespace::Html
+            && matches!(tag.as_str(), "script" | "style" | "textarea" | "title")
+        {
             let (end, next) =
                 find_raw_text_end(html, cursor, &tag).unwrap_or((html.len(), html.len()));
             let content = &html[cursor..end];
@@ -113,7 +172,12 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             continue;
         }
 
-        if !self_closing && !VOID_TAGS.contains(&tag.as_str()) {
+        let closes = if namespace == ParsingNamespace::Html {
+            VOID_TAGS.contains(&tag.as_str())
+        } else {
+            self_closing
+        };
+        if !closes {
             stack.push(id);
         }
     }
@@ -364,6 +428,75 @@ fn decode_codepoint(value: u32) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_parent(document: &Document, child: &str, parent: &str) {
+        assert_eq!(
+            document.parent_of(document.query_selector(child).unwrap()),
+            document.query_selector(parent),
+            "{child} should be inside {parent}"
+        );
+    }
+
+    #[test]
+    fn html_nonvoid_trailing_slash_does_not_close_element() {
+        let document = parse_document(
+            "<main><div/><span>inside</span></div><p>after</p><input/><img/><hr></main>",
+        )
+        .unwrap();
+        assert_parent(&document, "span", "div");
+        for tag in ["div", "p", "input", "img", "hr"] {
+            assert_parent(&document, tag, "main");
+        }
+    }
+
+    #[test]
+    fn foreign_self_closing_elements_remain_siblings() {
+        let document = parse_document("<main><svg><g/><rect/><title/><circle/></svg><math><mi/><mo/></math><p>after</p></main>").unwrap();
+        for tag in ["g", "rect", "title", "circle"] {
+            assert_parent(&document, tag, "svg");
+        }
+        for tag in ["mi", "mo"] {
+            assert_parent(&document, tag, "math");
+        }
+        assert_parent(&document, "p", "main");
+    }
+
+    #[test]
+    fn svg_integration_points_restore_html_parsing() {
+        for tag in ["foreignObject", "desc", "title"] {
+            let document = parse_document(&format!("<svg><{tag}><div/><span>inside</span></div><svg><path/><circle/></svg></{tag}><rect/></svg>")).unwrap();
+            assert_parent(&document, "span", "div");
+            assert_parent(&document, "div", &tag.to_ascii_lowercase());
+            assert_eq!(
+                document.parent_of(document.query_selector("path").unwrap()),
+                document.parent_of(document.query_selector("circle").unwrap())
+            );
+            assert_parent(&document, "rect", "svg");
+        }
+    }
+
+    #[test]
+    fn mathml_integration_points_and_exceptions() {
+        for parent in [
+            "mtext",
+            "annotation-xml encoding='TEXT/HTML'",
+            "annotation-xml encoding='application/xhtml+xml'",
+        ] {
+            let tag = parent.split_whitespace().next().unwrap();
+            let document = parse_document(&format!(
+                "<math><{parent}><div/><span>x</span></div></{tag}><mo/></math>"
+            ))
+            .unwrap();
+            assert_parent(&document, "span", "div");
+            assert_parent(&document, "div", tag);
+            assert_parent(&document, "mo", "math");
+        }
+        let document = parse_document("<math><mtext><mglyph/><malignmark/></mtext><annotation-xml><svg><path/><circle/></svg></annotation-xml></math>").unwrap();
+        assert_parent(&document, "mglyph", "mtext");
+        assert_parent(&document, "malignmark", "mtext");
+        assert_parent(&document, "path", "svg");
+        assert_parent(&document, "circle", "svg");
+    }
 
     fn element_text_node<'a>(document: &'a Document, tag: &str) -> &'a str {
         let id = document.query_selector(tag).unwrap();
