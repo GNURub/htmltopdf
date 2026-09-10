@@ -110,3 +110,24 @@ same whitespace predicate. Two regressions cover attribute slash recovery,
 URL preservation, child parentage and non-HTML whitespace in names and values.
 These corrections still do not provide the complete HTML tokenizer or tree
 construction algorithm.
+
+### Complete named-reference table and contextual decoding
+
+The parser now includes the 2,231 forms from the
+[WHATWG entity table](https://html.spec.whatwg.org/entities.json), retrieved
+2026-09-10, in a sorted static Rust table. No runtime dependency or download is
+required. Names are case-sensitive, longest matching names win, and replacements
+can contain two Unicode scalars. Legacy semicolonless names use the distinct
+attribute ambiguity rule; text and RCDATA use the text rule. Decoding is one
+pass and does not decode the replacement a second time.
+
+Numeric references accept optional semicolons, decimal and hexadecimal digits,
+replace invalid scalar values and overflow with U+FFFD, and apply the specified
+C1 compatibility mapping. Named lookup examines at most 32 ASCII bytes after
+an ampersand, rather than repeatedly scanning the rest of the input for `;`.
+Tests exercise every table entry in both contexts, sorting/length invariants,
+case differences, two-scalar replacements, ambiguous attributes, raw ampersands,
+numeric errors and a 10,000-digit reference. DOM tests cover actual attributes
+and textarea RCDATA. This improves decoding only: font coverage, Unicode
+shaping, line breaking and the rest of HTML tree construction remain separate
+requirements; no new visual parity score is claimed.

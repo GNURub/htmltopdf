@@ -1,6 +1,8 @@
 use crate::{dom::Document, RenderError};
 use std::collections::BTreeMap;
 
+mod entities;
+
 const VOID_TAGS: &[&str] = &[
     "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
     "wbr",
@@ -319,7 +321,7 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
                 while i < bytes.len() && bytes[i] != quote {
                     i += 1;
                 }
-                value = decode_entities(&input[value_start..i]);
+                value = decode_entities_in_context(&input[value_start..i], true);
                 if i < bytes.len() {
                     i += 1;
                 }
@@ -328,7 +330,7 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
                 while i < bytes.len() && !is_html_space(bytes[i] as char) {
                     i += 1;
                 }
-                value = decode_entities(&input[value_start..i]);
+                value = decode_entities_in_context(&input[value_start..i], true);
             }
         }
 
@@ -341,89 +343,98 @@ fn parse_attrs(input: &str) -> BTreeMap<String, String> {
 }
 
 fn decode_entities(input: &str) -> String {
+    decode_entities_in_context(input, false)
+}
+
+fn decode_entities_in_context(input: &str, attribute: bool) -> String {
     let mut output = String::with_capacity(input.len());
     let mut cursor = 0;
-
-    while let Some(relative_ampersand) = input[cursor..].find('&') {
-        let ampersand = cursor + relative_ampersand;
-        output.push_str(&input[cursor..ampersand]);
-
-        let entity_start = ampersand + 1;
-        let Some(relative_semicolon) = input[entity_start..].find(';') else {
-            output.push('&');
-            cursor = entity_start;
-            continue;
-        };
-        let semicolon = entity_start + relative_semicolon;
-        let entity = &input[entity_start..semicolon];
-        if let Some(character) = decode_entity(entity) {
+    while let Some(relative) = input[cursor..].find('&') {
+        let amp = cursor + relative;
+        output.push_str(&input[cursor..amp]);
+        let start = amp + 1;
+        let tail = &input[start..];
+        if let Some((consumed, character)) = numeric_reference(tail) {
             output.push(character);
-        } else {
-            output.push_str(&input[ampersand..=semicolon]);
+            cursor = start + consumed;
+            continue;
         }
-        cursor = semicolon + 1;
+        // Names are ASCII and at most 32 bytes. Never scan arbitrarily far
+        // forward looking for a semicolon after an unknown ampersand.
+        let length = tail
+            .bytes()
+            .take(32)
+            .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b';')
+            .count();
+        let mut matched = None;
+        for end in (1..=length).rev() {
+            let name = &tail[..end];
+            if let Ok(index) = entities::NAMED.binary_search_by_key(&name, |entry| entry.0) {
+                let ambiguous = attribute
+                    && !name.ends_with(';')
+                    && tail
+                        .as_bytes()
+                        .get(end)
+                        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'=');
+                if !ambiguous {
+                    matched = Some((end, entities::NAMED[index].1));
+                }
+                break;
+            }
+        }
+        if let Some((consumed, text)) = matched {
+            output.push_str(text);
+            cursor = start + consumed;
+        } else {
+            output.push('&');
+            cursor = start;
+        }
     }
-
     output.push_str(&input[cursor..]);
     output
 }
 
-fn decode_entity(entity: &str) -> Option<char> {
-    if let Some(value) = entity
-        .strip_prefix("#x")
-        .or_else(|| entity.strip_prefix("#X"))
-    {
-        return u32::from_str_radix(value, 16)
-            .ok()
-            .and_then(decode_codepoint);
+fn numeric_reference(input: &str) -> Option<(usize, char)> {
+    let bytes = input.as_bytes();
+    if bytes.first() != Some(&b'#') {
+        return None;
     }
-    if let Some(value) = entity.strip_prefix('#') {
-        return value.parse::<u32>().ok().and_then(decode_codepoint);
-    }
-
-    let name = entity.to_ascii_lowercase();
-    let character = match name.as_str() {
-        "nbsp" => '\u{00a0}',
-        "amp" => '&',
-        "lt" => '<',
-        "gt" => '>',
-        "quot" => '"',
-        "apos" => '\'',
-        "copy" => '\u{00a9}',
-        "reg" => '\u{00ae}',
-        "trade" => '\u{2122}',
-        "euro" => '\u{20ac}',
-        "pound" => '\u{00a3}',
-        "yen" => '\u{00a5}',
-        "cent" => '\u{00a2}',
-        "curren" => '\u{00a4}',
-        "deg" => '\u{00b0}',
-        "plusmn" => '\u{00b1}',
-        "micro" => '\u{00b5}',
-        "para" => '\u{00b6}',
-        "middot" => '\u{00b7}',
-        "times" => '\u{00d7}',
-        "divide" => '\u{00f7}',
-        "ndash" => '\u{2013}',
-        "mdash" => '\u{2014}',
-        "lsquo" => '\u{2018}',
-        "rsquo" => '\u{2019}',
-        "ldquo" => '\u{201c}',
-        "rdquo" => '\u{201d}',
-        "bull" => '\u{2022}',
-        "hellip" => '\u{2026}',
-        "laquo" => '\u{00ab}',
-        "raquo" => '\u{00bb}',
-        "sect" => '\u{00a7}',
-        "frac14" => '\u{00bc}',
-        "frac12" => '\u{00bd}',
-        "frac34" => '\u{00be}',
-        _ => return None,
+    let mut cursor = 1;
+    let radix = if matches!(bytes.get(cursor), Some(b'x' | b'X')) {
+        cursor += 1;
+        16
+    } else {
+        10
     };
-    Some(character)
+    let digit_start = cursor;
+    let mut value = 0u32;
+    while let Some(digit) = bytes
+        .get(cursor)
+        .and_then(|byte| (*byte as char).to_digit(radix))
+    {
+        value = value.saturating_mul(radix).saturating_add(digit);
+        cursor += 1;
+    }
+    if cursor == digit_start {
+        return None;
+    }
+    if bytes.get(cursor) == Some(&b';') {
+        cursor += 1;
+    }
+    Some((cursor, decode_codepoint(value)?))
 }
 
 fn decode_codepoint(value: u32) -> Option<char> {
+    const C1: [u32; 32] = [
+        0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039,
+        0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
+        0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
+    ];
+    let value = if (0x80..=0x9f).contains(&value) {
+        C1[(value - 0x80) as usize]
+    } else {
+        value
+    };
     match value {
         0 | 0xd800..=0xdfff | 0x110000.. => Some('\u{fffd}'),
         value => char::from_u32(value),
@@ -440,6 +451,72 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn named_reference_table_is_complete_sorted_and_decodes_every_entry() {
+        assert_eq!(entities::NAMED.len(), 2231);
+        for pair in entities::NAMED.windows(2) {
+            assert!(pair[0].0 < pair[1].0);
+        }
+        for &(name, expected) in entities::NAMED {
+            assert!(name.len() <= 32);
+            assert_eq!(decode_entities(&format!("&{name}")), expected, "{name}");
+            assert_eq!(
+                decode_entities_in_context(&format!("&{name}"), true),
+                expected,
+                "attribute {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn named_references_are_case_sensitive_longest_match_and_context_aware() {
+        assert_eq!(
+            decode_entities("&Aacute; &aacute; &NotEqualTilde; &AMP; &Amp;"),
+            "Á á ≂\u{338} & &Amp;"
+        );
+        assert_eq!(
+            decode_entities("&notin; &notit; &copy! &amp;lt;"),
+            "∉ ¬it; ©! &lt;"
+        );
+        assert_eq!(
+            decode_entities_in_context("&notit; &copy=1 &copy! &amp;lt;", true),
+            "&notit; &copy=1 ©! &lt;"
+        );
+        assert_eq!(
+            decode_entities("&unknown &copy; &é &amp;"),
+            "&unknown © &é &"
+        );
+    }
+
+    #[test]
+    fn numeric_references_allow_missing_semicolons_and_replace_invalid_values() {
+        assert_eq!(
+            decode_entities("&#65 &#x41! &#X1f980; &#128; &#x9f;"),
+            "A A! 🦀 € Ÿ"
+        );
+        assert_eq!(
+            decode_entities("&#0; &#xD800; &#1114112; &#999999999999999999999;"),
+            "� � � �"
+        );
+        assert_eq!(
+            decode_entities("&#+65; &#-1; &#x; &#;"),
+            "&#+65; &#-1; &#x; &#;"
+        );
+        assert_eq!(decode_entities(&format!("&#{};", "9".repeat(10000))), "�");
+    }
+
+    #[test]
+    fn entity_context_is_used_in_attributes_and_rcdata() {
+        let document = parse_document("<div title='&copy=1 &Aacute; &NotEqualTilde;'></div><textarea>&copy=1 &Aacute; &NotEqualTilde;</textarea>").unwrap();
+        let Some(crate::dom::Node::Element(element)) =
+            document.node(document.query_selector("div").unwrap())
+        else {
+            panic!("missing div");
+        };
+        assert_eq!(element.attr("title"), Some("&copy=1 Á ≂\u{338}"));
+        assert_eq!(element_text_node(&document, "textarea"), "©=1 Á ≂\u{338}");
     }
 
     #[test]
