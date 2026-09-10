@@ -212,3 +212,12 @@ painting. Regression cases include malformed Unicode alpha and valid alpha
 percentages. Relative RGB, other functional color grammars, missing-component
 interpolation and full CSS numeric-token validation remain incomplete.
 Reference: [CSS RGB functions](https://www.w3.org/TR/css-color-4/#rgb-functions).
+
+RGB and shared alpha channel parsing now validate numeric token structure and
+finiteness before clamping. NaN/infinity spellings, malformed exponents,
+trailing decimal points and whitespace inside percentage tokens are rejected;
+signed fractions, scientific notation, percentages and finite out-of-range
+clamping are tested. Numbers exceeding f32 capacity are currently rejected,
+rather than implementing full CSS numeric range handling. Other color models
+may still substitute their alpha default when their shared parser rejects a
+value; their complete grammar and fallback behavior remain to be corrected.

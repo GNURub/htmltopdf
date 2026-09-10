@@ -8635,30 +8635,58 @@ fn parse_channel_calc_amount(value: &str, scale: f32) -> Option<f32> {
     value.trim().parse::<f32>().ok()
 }
 
-fn parse_rgb_channel(value: &str) -> Option<f32> {
-    if let Some(percent) = value.strip_suffix('%') {
-        return percent
-            .trim()
-            .parse::<f32>()
-            .ok()
-            .map(|v| (v / 100.0).clamp(0.0, 1.0));
+fn parse_finite_color_number(value: &str) -> Option<f32> {
+    let bytes = value.as_bytes();
+    let mut cursor = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let integer_start = cursor;
+    while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+        cursor += 1;
     }
-    value
-        .trim()
-        .parse::<f32>()
-        .ok()
-        .map(|v| (v / 255.0).clamp(0.0, 1.0))
+    let has_integer = cursor > integer_start;
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let fraction_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == fraction_start {
+            return None;
+        }
+    } else if !has_integer {
+        return None;
+    }
+    if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
+        cursor += 1;
+        if matches!(bytes.get(cursor), Some(b'+' | b'-')) {
+            cursor += 1;
+        }
+        let exponent_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == exponent_start {
+            return None;
+        }
+    }
+    if cursor != bytes.len() {
+        return None;
+    }
+    let number = value.parse::<f32>().ok()?;
+    number.is_finite().then_some(number)
+}
+
+fn parse_rgb_channel(value: &str) -> Option<f32> {
+    let value = value.trim();
+    let (number, scale) = value
+        .strip_suffix('%')
+        .map_or((value, 255.0), |v| (v, 100.0));
+    Some((parse_finite_color_number(number)? / scale).clamp(0.0, 1.0))
 }
 
 fn parse_alpha_channel(value: &str) -> Option<f32> {
-    if let Some(percent) = value.strip_suffix('%') {
-        return percent
-            .trim()
-            .parse::<f32>()
-            .ok()
-            .map(|v| (v / 100.0).clamp(0.0, 1.0));
-    }
-    value.trim().parse::<f32>().ok().map(|v| v.clamp(0.0, 1.0))
+    let value = value.trim();
+    let (number, scale) = value.strip_suffix('%').map_or((value, 1.0), |v| (v, 100.0));
+    Some((parse_finite_color_number(number)? / scale).clamp(0.0, 1.0))
 }
 
 fn parse_hsl_color(value: &str) -> Option<Color> {
@@ -10848,6 +10876,29 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn color_channel_numbers_require_finite_css_numeric_tokens() {
+        for value in [
+            "NaN", "inf", "infinity", "-inf", "1e999", "1.", "+", ".", "1e", "1e+", "1 0", "10 %",
+            "é",
+        ] {
+            assert_eq!(parse_rgb_channel(value), None, "RGB {value}");
+            assert_eq!(parse_alpha_channel(value), None, "alpha {value}");
+            assert!(Color::from_css(&format!("rgb({value} 0 0)")).is_none());
+            assert!(Color::from_css(&format!("rgb(0 0 0 / {value})")).is_none());
+        }
+        for (value, expected) in [
+            (".5", 0.5),
+            ("+5e-1", 0.5),
+            ("50%", 0.5),
+            ("-2", 0.0),
+            ("2", 1.0),
+        ] {
+            assert_eq!(parse_alpha_channel(value), Some(expected), "{value}");
+        }
+        assert_eq!(parse_rgb_channel("2.55e2"), Some(1.0));
     }
 
     #[test]
