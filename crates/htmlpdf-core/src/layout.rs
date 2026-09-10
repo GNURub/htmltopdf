@@ -7929,6 +7929,15 @@ fn has_styled_inline_children(document: &Document, id: NodeId) -> bool {
     })
 }
 
+fn is_css_collapsible_space(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000c}')
+}
+
+fn css_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(is_css_collapsible_space)
+        .filter(|part| !part.is_empty())
+}
+
 fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSegment> {
     let mut tokens = Vec::new();
     let mut pending_space = false;
@@ -7949,7 +7958,7 @@ fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSeg
                     style: segment.style.clone(),
                 });
                 pending_space = false;
-            } else if character.is_whitespace() {
+            } else if is_css_collapsible_space(character) {
                 push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
                 pending_space = true;
             } else {
@@ -8025,7 +8034,17 @@ fn wrap_one_inline_line(
             continue;
         }
 
-        let token_width = inline_segments_wrap_width(std::slice::from_ref(token), available_width);
+        // Styling boundaries are not soft wrap opportunities. Measure the
+        // complete word, which may span several differently styled runs,
+        // before deciding whether to move it to the next line.
+        let mut word_end = cursor + 1;
+        while word_end < tokens.len()
+            && tokens[word_end].text != " "
+            && tokens[word_end].text != "\n"
+        {
+            word_end += 1;
+        }
+        let token_width = inline_segments_wrap_width(&tokens[cursor..word_end], available_width);
         let space_width = pending_space
             .as_ref()
             .map(|space| inline_segments_wrap_width(std::slice::from_ref(space), available_width))
@@ -8044,9 +8063,9 @@ fn wrap_one_inline_line(
             line.push(space);
             current_width += space_width;
         }
-        line.push(token.clone());
+        line.extend_from_slice(&tokens[cursor..word_end]);
         current_width += token_width;
-        cursor += 1;
+        cursor = word_end;
     }
 
     (line, cursor)
@@ -8868,7 +8887,7 @@ fn advance_wrapped_text(text: &str, line: &str) -> String {
 fn collapse_normal_whitespace_for_layout(text: &str) -> String {
     let collapsed_parts = text
         .split('\n')
-        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|part| css_words(part).collect::<Vec<_>>().join(" "))
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     if collapsed_parts.len() > 1 {
@@ -8880,7 +8899,7 @@ fn collapse_normal_whitespace_for_layout(text: &str) -> String {
 
 fn collapse_pre_line_whitespace_for_layout(text: &str) -> String {
     text.split('\n')
-        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|part| css_words(part).collect::<Vec<_>>().join(" "))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -8964,7 +8983,7 @@ fn wrap_text_with_face(
 
     for paragraph in text.split('\n') {
         let mut current = String::new();
-        for word in paragraph.split_whitespace() {
+        for word in css_words(paragraph) {
             let candidate = if current.is_empty() {
                 word.to_string()
             } else {
@@ -10684,6 +10703,93 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_style_boundaries_do_not_split_words() {
+        let normal = ComputedStyle::default();
+        let mut bold = normal.clone();
+        bold.font_weight = FontWeight::Bold;
+        let tokens = tokenize_inline_segments(&[
+            InlineTextSegment {
+                text: "lead ab".into(),
+                style: normal.clone(),
+            },
+            InlineTextSegment {
+                text: "cdef".into(),
+                style: bold,
+            },
+            InlineTextSegment {
+                text: " tail".into(),
+                style: normal,
+            },
+        ]);
+        let width = inline_segments_wrap_width(&tokens[..3], 100.0) + 0.1;
+        let (first, next) = wrap_one_inline_line(&tokens, 0, width, false);
+        assert_eq!(
+            first
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "lead"
+        );
+        let (second, _) = wrap_one_inline_line(&tokens, next, width, false);
+        assert_eq!(
+            second
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "abcdef"
+        );
+        assert_eq!(second[1].style.font_weight, FontWeight::Bold);
+        let (oversized, next) = wrap_one_inline_line(&tokens, next, 1.0, false);
+        assert_eq!(
+            oversized.len(),
+            2,
+            "an unbreakable word overflows as a whole"
+        );
+        assert_eq!(tokens[next].text, "tail");
+    }
+
+    #[test]
+    fn nonbreaking_spaces_survive_inline_and_plain_text_wrapping() {
+        let mut style = ComputedStyle::default();
+        style.overflow_wrap = OverflowWrap::Normal;
+        for separator in ['\u{00a0}', '\u{202f}'] {
+            let text = format!("alpha{separator}beta");
+            let tokens = tokenize_inline_segments(&[InlineTextSegment {
+                text: text.clone(),
+                style: style.clone(),
+            }]);
+            assert_eq!(tokens.len(), 1);
+            let (line, next) = wrap_one_inline_line(&tokens, 0, 1.0, false);
+            assert_eq!(line[0].text, text);
+            assert_eq!(next, 1);
+            assert_eq!(wrap_text_with_style(&text, &style, 1.0), vec![text]);
+        }
+    }
+
+    #[test]
+    fn html_nonbreaking_space_keeps_words_on_one_line() {
+        for content in ["alpha&nbsp;beta", "<strong>alpha</strong>&nbsp;beta"] {
+            let html = format!("<p style='width:20pt;overflow-wrap:normal'>{content}</p>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+            let runs: Vec<_> = pages[0]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(run) => Some(run),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+                "alpha\u{00a0}beta"
+            );
+            assert!(runs.iter().all(|run| (run.y - runs[0].y).abs() < 0.01));
+        }
+    }
 
     #[test]
     fn justified_inline_runs_emit_the_spacing_used_for_placement() {

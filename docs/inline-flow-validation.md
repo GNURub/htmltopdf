@@ -14,6 +14,16 @@ Changes covered by regression tests:
 - Whitespace between blocks does not interrupt adjacent-margin collapse.
 - Justification writes the same word spacing used to position subsequent runs.
 - Unembedded PDF fallback fonts use standard font names, including bold variants.
+- A word spanning multiple styled text runs is measured and wrapped as a unit;
+  styling boundaries do not introduce soft wrap opportunities.
+- U+00A0 and U+202F survive whitespace normalization in inline and plain-text
+  layout. End-to-end HTML tests cover `&nbsp;` with and without nested emphasis
+  under `overflow-wrap: normal`.
+
+Whitespace normalization follows the document-whitespace distinction in
+[CSS Text](https://www.w3.org/TR/css-text-3/#white-space-processing), not Rust's
+broader Unicode `is_whitespace` classification. This does not yet implement the
+full Unicode line-breaking algorithm or all CSS whitespace modes.
 
 ## Visual evidence (2026-09-10)
 
