@@ -202,3 +202,13 @@ slicing. Tests cover 567 combinations of Unicode/control/invalid characters
 and positions, valid short/long RGB and RGBA equivalents, uppercase digits and
 invalid lengths. This fixes that specific panic; it is not an exhaustive
 malformed-input or resource-exhaustion audit of the renderer.
+
+Absolute RGB/RGBA parsing now distinguishes comma-separated legacy syntax from
+space-separated modern syntax. It rejects extra channels, empty components,
+mixed separator forms, repeated slashes and invalid alpha instead of silently
+using opacity one. Legacy channel units must be consistent; modern syntax
+accepts mixed number/percentage channels and resolves `none` to zero for direct
+painting. Regression cases include malformed Unicode alpha and valid alpha
+percentages. Relative RGB, other functional color grammars, missing-component
+interpolation and full CSS numeric-token validation remain incomplete.
+Reference: [CSS RGB functions](https://www.w3.org/TR/css-color-4/#rgb-functions).

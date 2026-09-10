@@ -8462,21 +8462,55 @@ fn parse_rgb_color(value: &str) -> Option<Color> {
         return parse_relative_rgb_color(body);
     }
 
-    let body = body.replace(',', " ").replace('/', " ");
-    let parts = body.split_whitespace().collect::<Vec<_>>();
+    let legacy = body.contains(',');
+    let (parts, alpha) = if legacy {
+        if body.contains('/') {
+            return None;
+        }
+        let parts: Vec<_> = body.split(',').map(str::trim).collect();
+        if !matches!(parts.len(), 3 | 4) {
+            return None;
+        }
+        let percentage = parts[0].ends_with('%');
+        if parts[..3]
+            .iter()
+            .any(|part| part.ends_with('%') != percentage || *part == "none")
+        {
+            return None;
+        }
+        let alpha = match parts.get(3) {
+            Some(value) => parse_alpha_channel(value)?,
+            None => 1.0,
+        };
+        (parts[..3].to_vec(), alpha)
+    } else {
+        let mut sections = body.split('/');
+        let parts: Vec<_> = sections.next()?.split_whitespace().collect();
+        let alpha = match sections.next() {
+            Some(value) if value.trim() == "none" => 0.0,
+            Some(value) => parse_alpha_channel(value.trim())?,
+            None => 1.0,
+        };
+        if sections.next().is_some() || parts.len() != 3 {
+            return None;
+        }
+        (parts, alpha)
+    };
     let channels = parts
         .iter()
         .take(3)
         .copied()
-        .map(parse_rgb_channel)
+        .map(|value| {
+            if !legacy && value == "none" {
+                Some(0.0)
+            } else {
+                parse_rgb_channel(value)
+            }
+        })
         .collect::<Option<Vec<_>>>()?;
     if channels.len() != 3 {
         return None;
     }
-    let alpha = parts
-        .get(3)
-        .and_then(|value| parse_alpha_channel(value))
-        .unwrap_or(1.0);
     Some(Color {
         r: channels[0],
         g: channels[1],
@@ -10814,6 +10848,37 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn rgb_function_rejects_malformed_separators_channels_and_alpha() {
+        for value in [
+            "rgb(1 2 3 4)",
+            "rgb(1,2,3,4,5)",
+            "rgb(1,2,3 / 0.5)",
+            "rgb(1,,2,3)",
+            "rgb(1,2,3,é)",
+            "rgb(1 2 3 / 🦀)",
+            "rgb(1 2 3 /)",
+            "rgb(1 2 3 / .5 / .5)",
+            "rgb(10%,2,3)",
+            "rgb(none,2,3)",
+        ] {
+            assert_eq!(Color::from_css(value), None, "{value}");
+        }
+        for (value, hex) in [
+            ("rgb(255,0,0)", "#ff0000"),
+            ("rgba(100%,0%,0%,50%)", "#ff000080"),
+            ("rgb(255 0% none / none)", "#ff000000"),
+        ] {
+            let actual = Color::from_css(value).unwrap();
+            let expected = Color::from_css(hex).unwrap();
+            assert_eq!(
+                (actual.r, actual.g, actual.b),
+                (expected.r, expected.g, expected.b)
+            );
+            assert!((actual.a - expected.a).abs() < 0.003);
+        }
     }
 
     #[test]
