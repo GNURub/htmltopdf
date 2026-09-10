@@ -57,7 +57,7 @@ def parse_rmse(stderr: str) -> tuple[float, float]:
     # ImageMagick emits e.g. "1234.56 (0.018837)" to stderr.
     match = re.search(r"([0-9.]+)\s+\(([0-9.]+)\)", stderr)
     if not match:
-        return 0.0, 0.0
+        raise ValueError(f"could not parse ImageMagick RMSE: {stderr!r}")
     return float(match.group(1)), float(match.group(2))
 
 
@@ -129,6 +129,10 @@ def main() -> int:
     parser.add_argument("--max-pages", type=int, default=None, help="Optional cap when --pages all is used")
     parser.add_argument("--threshold-rmse-normalized", type=float, default=None)
     args = parser.parse_args()
+    if args.max_pages is not None and args.max_pages < 1:
+        parser.error("--max-pages must be positive")
+    if args.threshold_rmse_normalized is not None and not 0 <= args.threshold_rmse_normalized <= 1:
+        parser.error("--threshold-rmse-normalized must be between 0 and 1")
 
     html = args.html.resolve()
     if not html.exists():
@@ -225,12 +229,13 @@ def main() -> int:
         "threshold_rmse_normalized": args.threshold_rmse_normalized,
         "passed_threshold": None
         if args.threshold_rmse_normalized is None
-        else max_rmse_page["rmse_normalized"] <= args.threshold_rmse_normalized,
+        else htmlpdf_page_count == browser_page_count
+        and max_rmse_page["rmse_normalized"] <= args.threshold_rmse_normalized,
     }
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
-    if args.threshold_rmse_normalized is not None and rmse_normalized > args.threshold_rmse_normalized:
+    if report["passed_threshold"] is False:
         return 1
     return 0
 
