@@ -169,3 +169,11 @@ negative, percentage, non-finite and overlong lists leave the preceding valid
 declaration intact. This does not yet unify keyword handling across individual
 longhands or implement per-side styles and their computed zero-width rules.
 Reference: [CSS border widths](https://www.w3.org/TR/CSS2/box.html#border-width-properties).
+
+The individual physical/logical width longhands and the two logical axis width
+properties now share that component parser. Regression cases cover all ten
+properties with keywords, zero, functional lengths and invalid negative,
+non-finite and percentage values. Axis pairs reject an invalid component as a
+whole. Logical-to-physical mapping for nondefault writing modes remains
+incomplete, as do border-style-dependent used widths and general `border`
+shorthand resets. These tests validate computed values, not raster parity.

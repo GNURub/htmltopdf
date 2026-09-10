@@ -1014,33 +1014,33 @@ impl ComputedStyle {
                     }
                 }
                 "border-top-width" | "border-block-start-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_top_width = value;
                     }
                 }
                 "border-right-width" | "border-inline-end-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_right_width = value;
                     }
                 }
                 "border-bottom-width" | "border-block-end-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_bottom_width = value;
                     }
                 }
                 "border-left-width" | "border-inline-start-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_left_width = value;
                     }
                 }
                 "border-block-width" => {
-                    if let Some((start, end)) = parse_two_value_axis(&value, length_context) {
+                    if let Some((start, end)) = parse_border_axis_widths(&value, length_context) {
                         self.border_top_width = start;
                         self.border_bottom_width = end;
                     }
                 }
                 "border-inline-width" => {
-                    if let Some((start, end)) = parse_two_value_axis(&value, length_context) {
+                    if let Some((start, end)) = parse_border_axis_widths(&value, length_context) {
                         self.border_left_width = start;
                         self.border_right_width = end;
                     }
@@ -7010,18 +7010,38 @@ fn parse_gap_shorthand_with_rem(
     }
 }
 
+fn parse_border_width(value: &str, context: impl Into<LengthContext> + Copy) -> Option<f32> {
+    let width = match value.trim().to_ascii_lowercase().as_str() {
+        "thin" => 0.75,
+        "medium" => 2.25,
+        "thick" => 3.75,
+        _ => parse_pt_or_px_with_rem(value, context)?,
+    };
+    (width.is_finite() && width >= 0.0).then_some(width)
+}
+
+fn parse_border_axis_widths(
+    value: &str,
+    context: impl Into<LengthContext> + Copy,
+) -> Option<(f32, f32)> {
+    let parts = split_css_whitespace(value);
+    match parts.as_slice() {
+        [all] => {
+            let width = parse_border_width(all, context)?;
+            Some((width, width))
+        }
+        [start, end] => Some((
+            parse_border_width(start, context)?,
+            parse_border_width(end, context)?,
+        )),
+        _ => None,
+    }
+}
+
 fn parse_border_widths(value: &str, context: impl Into<LengthContext> + Copy) -> Option<[f32; 4]> {
     let values = split_css_whitespace(value)
         .into_iter()
-        .map(|part| {
-            let width = match part.to_ascii_lowercase().as_str() {
-                "thin" => 0.75,
-                "medium" => 2.25,
-                "thick" => 3.75,
-                _ => parse_pt_or_px_with_rem(&part, context)?,
-            };
-            (width.is_finite() && width >= 0.0).then_some(width)
-        })
+        .map(|part| parse_border_width(&part, context))
         .collect::<Option<Vec<_>>>()?;
     match values.as_slice() {
         [all] => Some([*all; 4]),
@@ -10740,6 +10760,61 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn border_width_longhands_share_keyword_and_invalid_value_handling() {
+        for (property, affected) in [
+            ("border-top-width", vec![0]),
+            ("border-right-width", vec![1]),
+            ("border-bottom-width", vec![2]),
+            ("border-left-width", vec![3]),
+            ("border-block-start-width", vec![0]),
+            ("border-inline-end-width", vec![1]),
+            ("border-block-end-width", vec![2]),
+            ("border-inline-start-width", vec![3]),
+            ("border-block-width", vec![0, 2]),
+            ("border-inline-width", vec![3, 1]),
+        ] {
+            for (value, width) in [
+                ("THICK", 3.75),
+                ("0", 0.0),
+                ("calc(2pt + 1pt)", 3.0),
+                ("-1pt", 7.0),
+                ("NaNpt", 7.0),
+                ("10%", 7.0),
+            ] {
+                let document = parse_document("<div class='target'>box</div>").unwrap();
+                let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                    ".target {{border:7pt solid black;{property}:{value}}}"
+                )]);
+                let style = ComputedStyle::for_node(
+                    &document,
+                    &stylesheet,
+                    document.query_selector(".target").unwrap(),
+                );
+                let mut expected = [7.0; 4];
+                for side in &affected {
+                    expected[*side] = width;
+                }
+                assert_eq!(
+                    [
+                        style.border_top_width,
+                        style.border_right_width,
+                        style.border_bottom_width,
+                        style.border_left_width
+                    ],
+                    expected,
+                    "{property}:{value}"
+                );
+            }
+        }
+        assert_eq!(
+            parse_border_axis_widths("thin thick", 12.0),
+            Some((0.75, 3.75))
+        );
+        assert_eq!(parse_border_axis_widths("thin -1pt", 12.0), None);
+        assert_eq!(parse_border_axis_widths("thin medium thick", 12.0), None);
     }
 
     #[test]
