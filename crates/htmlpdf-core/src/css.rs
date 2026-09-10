@@ -1003,12 +1003,14 @@ impl ComputedStyle {
                     }
                 }
                 "border-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
-                        self.border_width = value;
-                        self.border_top_width = value;
-                        self.border_right_width = value;
-                        self.border_bottom_width = value;
-                        self.border_left_width = value;
+                    if let Some([top, right, bottom, left]) =
+                        parse_border_widths(&value, length_context)
+                    {
+                        self.border_width = top;
+                        self.border_top_width = top;
+                        self.border_right_width = right;
+                        self.border_bottom_width = bottom;
+                        self.border_left_width = left;
                     }
                 }
                 "border-top-width" | "border-block-start-width" => {
@@ -7008,6 +7010,28 @@ fn parse_gap_shorthand_with_rem(
     }
 }
 
+fn parse_border_widths(value: &str, context: impl Into<LengthContext> + Copy) -> Option<[f32; 4]> {
+    let values = split_css_whitespace(value)
+        .into_iter()
+        .map(|part| {
+            let width = match part.to_ascii_lowercase().as_str() {
+                "thin" => 0.75,
+                "medium" => 2.25,
+                "thick" => 3.75,
+                _ => parse_pt_or_px_with_rem(&part, context)?,
+            };
+            (width.is_finite() && width >= 0.0).then_some(width)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
+        _ => None,
+    }
+}
+
 fn parse_two_value_axis(
     value: &str,
     length_context: impl Into<LengthContext> + Copy,
@@ -10716,6 +10740,42 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn expands_border_width_components_and_rejects_invalid_lists() {
+        for (value, expected) in [
+            ("1pt", [1.0; 4]),
+            ("1pt 2pt", [1.0, 2.0, 1.0, 2.0]),
+            ("1pt 2pt 3pt", [1.0, 2.0, 3.0, 2.0]),
+            ("1pt 2pt 3pt 0", [1.0, 2.0, 3.0, 0.0]),
+            ("thin medium thick", [0.75, 2.25, 3.75, 2.25]),
+            ("calc(1pt + 2pt) 4pt", [3.0, 4.0, 3.0, 4.0]),
+            ("1pt -2pt", [7.0; 4]),
+            ("1pt 20%", [7.0; 4]),
+            ("1pt 2pt 3pt 4pt 5pt", [7.0; 4]),
+            ("NaNpt", [7.0; 4]),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border:7pt solid black;border-width:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_width,
+                    style.border_right_width,
+                    style.border_bottom_width,
+                    style.border_left_width
+                ],
+                expected,
+                "{value}"
+            );
+        }
     }
 
     #[test]

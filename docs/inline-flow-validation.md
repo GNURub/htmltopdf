@@ -161,3 +161,11 @@ as the CSS shorthand parser does, while retaining its numeric assertions.
 Per-side border styles and shorthand resets, synthetic table borders and native
 control defaults remain separate incomplete paths. No visual parity score is
 claimed for this correction.
+
+`border-width` now expands one through four components in CSS side order,
+including functional lengths and thin/medium/thick (1/3/5 CSS pixels).
+A computed-style regression checks all four output sides and verifies that
+negative, percentage, non-finite and overlong lists leave the preceding valid
+declaration intact. This does not yet unify keyword handling across individual
+longhands or implement per-side styles and their computed zero-width rules.
+Reference: [CSS border widths](https://www.w3.org/TR/CSS2/box.html#border-width-properties).
