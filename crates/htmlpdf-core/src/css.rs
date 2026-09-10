@@ -8254,6 +8254,11 @@ fn matching_function_end(value: &str) -> Option<usize> {
 
 fn parse_hex_color(value: &str) -> Option<Color> {
     let hex = value.strip_prefix('#')?;
+    // Validate before slicing byte pairs: non-ASCII input may place a UTF-8
+    // character across a pair boundary. Signs are not CSS hex digits either.
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
     let expand = |ch: char| -> Option<u8> {
         let digit = ch.to_digit(16)? as u8;
         Some(digit * 17)
@@ -10809,6 +10814,42 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn malformed_hex_colors_are_rejected_without_panicking() {
+        for character in ['é', '€', '🦀', '\0', '+', '-', 'g'] {
+            for before in 0..9 {
+                for after in 0..9 {
+                    let value = format!("#{}{character}{}", "a".repeat(before), "b".repeat(after));
+                    assert_eq!(Color::from_css(&value), None, "{value:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hex_color_forms_have_identical_channels_and_alpha() {
+        for (short, long) in [
+            ("#abc", "#aabbcc"),
+            ("#abcd", "#aabbccdd"),
+            ("#ABC", "#aabbcc"),
+            ("#1230", "#11223300"),
+        ] {
+            assert!(Color::from_css(short).is_some());
+            assert_eq!(Color::from_css(short), Color::from_css(long));
+        }
+        for value in [
+            "#",
+            "#1",
+            "#12",
+            "#12345",
+            "#1234567",
+            "#123456789",
+            "#+f0000",
+        ] {
+            assert_eq!(Color::from_css(value), None, "{value}");
+        }
     }
 
     #[test]

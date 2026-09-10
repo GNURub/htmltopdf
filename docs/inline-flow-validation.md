@@ -194,3 +194,11 @@ all 148 name/hex pairs, with source and retrieval date; a unit test checks every
 RGB value, uppercase spelling and unique entry count through the runtime color
 parser. This proves the standard named-color lookup, not general color-space,
 compositing or PDF color-management fidelity. No dependency was added.
+
+Malformed hexadecimal color validation now precedes byte-pair slicing. A
+regression reproduced a panic when a multibyte UTF-8 character crossed a pair
+boundary. The parser rejects non-ASCII hexadecimal digits and signs before
+slicing. Tests cover 567 combinations of Unicode/control/invalid characters
+and positions, valid short/long RGB and RGBA equivalents, uppercase digits and
+invalid lengths. This fixes that specific panic; it is not an exhaustive
+malformed-input or resource-exhaustion audit of the renderer.
