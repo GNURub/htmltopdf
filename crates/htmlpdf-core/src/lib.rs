@@ -54,6 +54,28 @@ pub struct PageOptions {
 }
 
 impl PageOptions {
+    /// Reject non-finite geometry and pages with no printable area.
+    pub fn validate(&self) -> Result<(), RenderError> {
+        let values = [
+            self.width_pt,
+            self.height_pt,
+            self.margin_top_pt,
+            self.margin_right_pt,
+            self.margin_bottom_pt,
+            self.margin_left_pt,
+        ];
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+            || self.width_pt <= self.margin_left_pt + self.margin_right_pt
+            || self.height_pt <= self.margin_top_pt + self.margin_bottom_pt
+        {
+            return Err(RenderError::InvalidInput(
+                "page geometry must be finite and nonnegative, with positive printable width and height".into(),
+            ));
+        }
+        Ok(())
+    }
     const CHROMIUM_DEFAULT_PRINT_MARGIN_PT: f32 = 28.35;
     pub const A4_WIDTH_PT: f32 = 595.0;
     pub const A4_HEIGHT_PT: f32 = 842.0;
@@ -141,6 +163,7 @@ pub fn render_html_to_pages(
     html: &str,
     options: &RenderOptions,
 ) -> Result<(Vec<LayoutPage>, PageOptions), RenderError> {
+    options.page.validate()?;
     let mut document = parser::parse_document(html)?;
 
     if options.js == JsMode::Limited {
@@ -150,6 +173,7 @@ pub fn render_html_to_pages(
     let stylesheet = css::Stylesheet::from_css_chunks(load_css_chunks(&document, options)?);
     let mut effective_options = options.clone();
     effective_options.page = stylesheet.page_options(options.page);
+    effective_options.page.validate()?;
     let pages = layout::layout_document(&document, &stylesheet, &effective_options);
     Ok((pages, effective_options.page))
 }
@@ -159,6 +183,10 @@ pub fn write_pages_to_pdf(
     pages: &[LayoutPage],
     page: &PageOptions,
 ) -> Result<Vec<u8>, RenderError> {
+    page.validate()?;
+    for layout_page in pages {
+        layout_page.page.validate()?;
+    }
     pdf::write_pdf(pages, page).map_err(RenderError::Pdf)
 }
 
@@ -240,6 +268,23 @@ fn normalize_base_path(base_url: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invalid_page_geometry_is_rejected_before_layout() {
+        for width in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let mut options = super::RenderOptions::default();
+            options.page.width_pt = width;
+            assert!(super::render_html_to_pdf("<p>text</p>", &options).is_err());
+        }
+        let options = super::RenderOptions::default();
+        assert!(super::render_html_to_pdf(
+            "<style>@page { size: 100pt 100pt; margin: 60pt; }</style><p>text</p>",
+            &options
+        )
+        .is_err());
+        let mut page = super::PageOptions::letter();
+        page.margin_top_pt = -1.0;
+        assert!(super::write_pages_to_pdf(&[], &page).is_err());
+    }
     use super::*;
 
     #[test]
