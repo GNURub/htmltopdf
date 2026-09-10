@@ -14,9 +14,13 @@ rejected. Reading has a one-second inactivity timeout and a ten-second overall
 budget checked between reads; a blocking read can extend that budget by up to
 one second. Writes have a ten-second inactivity timeout.
 
-The adapter is still single-threaded. These transport limits do not limit render
-CPU, memory, recursion, decoded image size or page count. The timeout option in
-RenderOptions applies to limited scripting, not the entire rendering pipeline.
+The adapter is still single-threaded. Each render runs in a disposable child
+process using the same binary. The parent kills and reaps a job after ten seconds
+(returning HTTP 504), rejects failed workers with HTTP 422, and accepts at most
+32 MiB of PDF output. Output is drained concurrently with input. These limits do
+not bound the worker's internal memory, recursion, decoded image size or page
+count; PDF size is checked after serialization in the worker. The timeout option
+in RenderOptions still applies only to limited scripting for direct library use.
 Local asset loading is supported and must be treated as filesystem access by the
 input document. Do not expose this process directly to untrusted clients.
 

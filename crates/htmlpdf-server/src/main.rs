@@ -3,6 +3,7 @@ use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
+mod worker;
 
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
@@ -90,7 +91,12 @@ fn read_request<R: Read>(reader: &mut R) -> Result<String, u16> {
 }
 
 fn main() {
-    if let Err(err) = run() {
+    let result = if env::args().nth(1).as_deref() == Some("--render-worker") {
+        worker::run()
+    } else {
+        run()
+    };
+    if let Err(err) = result {
         eprintln!("htmlpdf-server: {err}");
         std::process::exit(1);
     }
@@ -126,9 +132,9 @@ fn handle_client(mut stream: TcpStream) {
             return;
         }
     };
-    match render_html_to_pdf(&html, &RenderOptions::default()) {
+    match worker::render(html) {
         Ok(pdf) => write_response(&mut stream, 200, "application/pdf", &pdf),
-        Err(err) => write_response(&mut stream, 422, "text/plain", err.to_string().as_bytes()),
+        Err(status) => write_response(&mut stream, status, "text/plain", b"render job failed"),
     }
 }
 
@@ -143,6 +149,7 @@ fn write_response(stream: &mut TcpStream, status: u16, content_type: &str, body:
         417 => "Expectation Failed",
         422 => "Unprocessable Entity",
         431 => "Request Header Fields Too Large",
+        504 => "Gateway Timeout",
         _ => "Internal Server Error",
     };
     let header = format!(
