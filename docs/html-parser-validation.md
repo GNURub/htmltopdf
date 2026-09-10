@@ -37,6 +37,23 @@ Input CRLF and bare CR are normalized to LF before tokenization, without copying
 LF-only input. A textarea discards exactly its first LF, including when that LF
 comes from a character reference; title does not discard its first LF. Four
 additional tests cover these behaviors, case-insensitive end tags and name
-prefixes. This verifies DOM text, not textarea visual fidelity: the current
-form-control painting path still needs proper multiline text layout and
-whitespace handling.
+prefixes. This verifies DOM text, not textarea visual fidelity.
+
+## Textarea painting
+
+Textarea values now come from untrimmed child text, not a `value` attribute.
+An empty value may show its placeholder. The control has a separate multiline
+painting path with preserved spaces and blank lines, soft word wrapping,
+emergency splitting of oversized words, `wrap="off"`, and clipping inside the
+control. Single-line input/button painting is unchanged. Three tests cover
+value selection, whitespace-preserving wrapping, and line coordinates/clipping.
+
+The complete `examples/generic-textarea.html` fixture was rendered and visually
+inspected against Chromium headless shell revision 1243 using Poppler rasters.
+Both PDFs have one page with 667 x 584 pixels without resizing. Normalized RMSE
+is 0.162442; no acceptance threshold was asserted. Multiline content, blank
+lines, indentation, literal markup and no-wrap clipping are visible. Chromium
+also paints native scrollbars, which this engine does not yet implement; their
+space changes wrapping. Native control padding, placeholder appearance, tabs,
+text alignment, Unicode line-breaking rules and exact font metrics still need
+work. This fixture does not prove control or general browser parity.

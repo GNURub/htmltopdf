@@ -1363,7 +1363,23 @@ impl<'a> LayoutContext<'a> {
                     .with_opacity(style.opacity),
                 }));
             }
-            Some("textarea") | Some("button") | Some("submit") | Some("reset") => {
+            Some("textarea") => {
+                if let Some(text) = form_control_text(self.document, id, element) {
+                    self.push_textarea_text(
+                        &text,
+                        style,
+                        x,
+                        y,
+                        box_width,
+                        box_height,
+                        disabled,
+                        element
+                            .attr("wrap")
+                            .is_some_and(|value| value.eq_ignore_ascii_case("off")),
+                    );
+                }
+            }
+            Some("button") | Some("submit") | Some("reset") => {
                 if let Some(text) = form_control_text(self.document, id, element) {
                     self.push_form_control_text(
                         &text, style, x, y, box_width, box_height, disabled,
@@ -1391,6 +1407,65 @@ impl<'a> LayoutContext<'a> {
             style,
         );
         self.current_y -= box_height + style.margin_bottom;
+    }
+
+    fn push_textarea_text(
+        &mut self,
+        text: &str,
+        style: &ComputedStyle,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        disabled: bool,
+        no_wrap: bool,
+    ) {
+        let left = style.padding_left.max(4.0);
+        let right = style.padding_right.max(4.0);
+        let top = style.padding_top.max(4.0);
+        let bottom = style.padding_bottom.max(4.0);
+        let content_width = (width - left - right).max(0.0);
+        let content_height = (height - top - bottom).max(0.0);
+        if content_width <= 0.0 || content_height <= 0.0 {
+            return;
+        }
+        self.push(LayoutItem::BeginClip(ClipRect {
+            x: x + left,
+            y: y + bottom,
+            width: content_width,
+            height: content_height,
+            radius: 0.0,
+        }));
+        let mut baseline = y + height - top - style.font_size;
+        let transformed = transform_text(text, style.text_transform);
+        for line in wrap_textarea_lines(&transformed, style, content_width, no_wrap) {
+            if baseline + style.font_size <= y + bottom {
+                break;
+            }
+            if !line.is_empty() {
+                self.push(LayoutItem::Text(TextRun {
+                    x: x + left,
+                    y: baseline,
+                    text: line,
+                    font_size: style.font_size,
+                    color: (if disabled { rgb(0x6b7280) } else { style.color })
+                        .with_opacity(style.opacity),
+                    font_weight: style.font_weight,
+                    font_style: style.font_style,
+                    font_face: style.font_face,
+                    letter_spacing: style.letter_spacing,
+                    word_spacing: style.word_spacing,
+                    text_decoration: style.text_decoration,
+                    text_decoration_color: style.text_decoration_color,
+                    text_decoration_thickness: style.text_decoration_thickness,
+                    text_underline_offset: style.text_underline_offset,
+                    rotation_deg: 0.0,
+                    text_shadow: style.text_shadow,
+                }));
+            }
+            baseline -= layout_line_height(style).max(0.01);
+        }
+        self.push(LayoutItem::EndClip);
     }
 
     fn push_form_control_text(
@@ -7770,6 +7845,59 @@ fn form_control_box_size(
     (width.max(0.0), height.max(0.0))
 }
 
+fn wrap_textarea_lines(
+    text: &str,
+    style: &ComputedStyle,
+    width: f32,
+    no_wrap: bool,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    for hard_line in text.split('\n') {
+        if no_wrap || hard_line.is_empty() {
+            lines.push(hard_line.to_string());
+            continue;
+        }
+        let mut start = 0;
+        let mut cursor = 0;
+        let mut last_break = None;
+        let mut advance = 0.0;
+        while cursor < hard_line.len() {
+            let ch = hard_line[cursor..].chars().next().unwrap();
+            let mut buffer = [0; 4];
+            let glyph_width = estimate_text_width_with_spacing(
+                ch.encode_utf8(&mut buffer),
+                style.font_size,
+                style.font_face,
+                style.font_weight,
+                0.0,
+                style.word_spacing,
+            ) + if cursor > start {
+                style.letter_spacing
+            } else {
+                0.0
+            };
+            // Preserved trailing spaces can hang past the wrapping edge. A
+            // following word starts on the next line without losing them.
+            if ch != ' ' && cursor > start && advance + glyph_width > width {
+                let end = last_break.unwrap_or(cursor);
+                lines.push(hard_line[start..end].to_string());
+                start = end;
+                cursor = end;
+                last_break = None;
+                advance = 0.0;
+                continue;
+            }
+            advance += glyph_width;
+            cursor += ch.len_utf8();
+            if ch == ' ' {
+                last_break = Some(cursor);
+            }
+        }
+        lines.push(hard_line[start..].to_string());
+    }
+    lines
+}
+
 fn form_control_text(document: &Document, id: NodeId, element: &ElementNode) -> Option<String> {
     let kind = form_control_type(element);
     match kind.as_deref() {
@@ -7783,11 +7911,19 @@ fn form_control_text(document: &Document, id: NodeId, element: &ElementNode) -> 
             (!value.trim().is_empty()).then_some(value)
         }
         Some("textarea") => {
-            let value = element
-                .attr("value")
-                .map(str::to_string)
-                .unwrap_or_else(|| document.text_content(id).trim().to_string());
-            (!value.trim().is_empty()).then_some(value)
+            let value: String = document
+                .children(id)
+                .iter()
+                .filter_map(|child| match document.node(*child) {
+                    Some(Node::Text(text)) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if value.is_empty() {
+                element.attr("placeholder").map(str::to_string)
+            } else {
+                Some(value)
+            }
         }
         Some("password") => element
             .attr("value")
@@ -10943,6 +11079,80 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn textarea_value_comes_from_untrimmed_child_text_not_value_attribute() {
+        let document = crate::parser::parse_document(
+            "<textarea value='wrong' placeholder='hint'>  first\n second  </textarea>",
+        )
+        .unwrap();
+        let id = document.query_selector("textarea").unwrap();
+        let Some(Node::Element(element)) = document.node(id) else {
+            panic!("textarea")
+        };
+        assert_eq!(
+            form_control_text(&document, id, element),
+            Some("  first\n second  ".into())
+        );
+        let document =
+            crate::parser::parse_document("<textarea placeholder='hint'></textarea>").unwrap();
+        let id = document.query_selector("textarea").unwrap();
+        let Some(Node::Element(element)) = document.node(id) else {
+            panic!("textarea")
+        };
+        assert_eq!(
+            form_control_text(&document, id, element),
+            Some("hint".into())
+        );
+    }
+
+    #[test]
+    fn textarea_wrap_preserves_spaces_blank_lines_and_unicode() {
+        let style = ComputedStyle::default();
+        let input = "  alpha  beta\n\nΩmega";
+        assert_eq!(
+            wrap_textarea_lines(input, &style, 1000.0, false),
+            vec!["  alpha  beta", "", "Ωmega"]
+        );
+        let lines = wrap_textarea_lines("alpha  beta", &style, 40.0, false);
+        assert_eq!(lines.concat(), "alpha  beta");
+        assert!(lines.len() > 1);
+        assert_eq!(
+            wrap_textarea_lines("Ωmega", &style, 1.0, false).concat(),
+            "Ωmega"
+        );
+        assert_eq!(
+            wrap_textarea_lines("a very long line", &style, 1.0, true),
+            vec!["a very long line"]
+        );
+    }
+
+    #[test]
+    fn textarea_draws_separate_lines_preserves_blank_line_and_clips_content() {
+        let document = crate::parser::parse_document("<textarea style='width:180pt;height:70pt;font-size:10pt;line-height:12pt'>first\n\n  third</textarea>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "first");
+        assert_eq!(runs[1].text, "  third");
+        assert!((runs[0].y - runs[1].y - 24.0).abs() < 0.01);
+        assert!(pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::BeginClip(_))));
+        assert!(pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::EndClip)));
+    }
 
     #[test]
     fn inline_block_top_and_bottom_align_to_line_edges() {
