@@ -4249,11 +4249,12 @@ impl<'a> LayoutContext<'a> {
             for segment in line.segments {
                 if let Some(atomic) = &segment.atomic {
                     let mut items = atomic.items.clone();
-                    shift_layout_items(
-                        &mut items,
-                        x,
-                        self.current_y - baseline_offset + atomic.baseline,
-                    );
+                    let top_offset = match segment.style.vertical_align {
+                        VerticalAlign::Top => 0.0,
+                        VerticalAlign::Bottom => actual_height - atomic.height,
+                        _ => baseline_offset - atomic.baseline,
+                    };
+                    shift_layout_items(&mut items, x, self.current_y - top_offset);
                     self.pages.last_mut().unwrap().items.extend(items);
                     x += atomic.width;
                     continue;
@@ -8298,12 +8299,29 @@ fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f
 fn inline_line_metrics(segments: &[InlineTextSegment], style: &ComputedStyle) -> (f32, f32) {
     let mut ascent = style.font_size;
     let mut descent = (layout_line_height(style) - ascent).max(0.0);
+    let mut top_height = 0.0_f32;
+    let mut bottom_height = 0.0_f32;
     for segment in segments {
         if let Some(atomic) = &segment.atomic {
+            match segment.style.vertical_align {
+                VerticalAlign::Top => {
+                    top_height = top_height.max(atomic.height);
+                    continue;
+                }
+                VerticalAlign::Bottom => {
+                    bottom_height = bottom_height.max(atomic.height);
+                    continue;
+                }
+                _ => {}
+            }
             ascent = ascent.max(atomic.baseline);
             descent = descent.max(atomic.height - atomic.baseline);
         }
     }
+    // Top/bottom-aligned boxes constrain the total line height, not the
+    // baseline. Expand only the side needed to contain each aligned box.
+    ascent = ascent.max(bottom_height - descent);
+    descent = descent.max(top_height - ascent);
     (ascent, ascent + descent)
 }
 
@@ -10925,6 +10943,63 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_block_top_and_bottom_align_to_line_edges() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><p><span style='display:inline-block;width:20pt;height:40pt;background:#0000ff'></span><span style='display:inline-block;vertical-align:top;width:20pt;height:10pt;background:#ff0000'></span><span style='display:inline-block;vertical-align:bottom;width:20pt;height:15pt;background:#00ff00'></span></p></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let boxes: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.r + rect.color.g + rect.color.b == 1.0 => {
+                    Some(rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(boxes.len(), 3);
+        let line_top = options.page.height_pt - options.page.margin_top_pt;
+        assert!((boxes[0].y + 40.0 - line_top).abs() < 0.01);
+        assert!((boxes[1].y + 10.0 - line_top).abs() < 0.01);
+        assert!((boxes[2].y - (line_top - 42.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn edge_aligned_atomic_boxes_minimize_line_height() {
+        let mut style = ComputedStyle::default();
+        style.font_size = 10.0;
+        style.line_height = 12.0;
+        style.line_height_is_normal = false;
+        style.line_height_multiplier = None;
+        let make_box = |alignment, height| {
+            let mut box_style = style.clone();
+            box_style.vertical_align = alignment;
+            InlineTextSegment {
+                text: String::new(),
+                style: box_style,
+                atomic: Some(std::rc::Rc::new(InlineAtomicBox {
+                    items: Vec::new(),
+                    width: 20.0,
+                    height,
+                    baseline: height,
+                })),
+            }
+        };
+        let top = make_box(VerticalAlign::Top, 40.0);
+        let bottom = make_box(VerticalAlign::Bottom, 30.0);
+        assert_eq!(
+            inline_line_metrics(std::slice::from_ref(&top), &style),
+            (10.0, 40.0)
+        );
+        assert_eq!(
+            inline_line_metrics(std::slice::from_ref(&bottom), &style),
+            (28.0, 30.0)
+        );
+        assert_eq!(inline_line_metrics(&[top, bottom], &style), (28.0, 40.0));
+    }
 
     #[test]
     fn border_box_dimensions_cannot_be_smaller_than_padding_and_borders() {

@@ -71,7 +71,7 @@ badges, adjacent tiles wrapping to another line, and an empty inline box.
 
 This is initial support, not complete inline formatting conformance. In
 particular, intrinsic sizing still uses approximate text measurements;
-`vertical-align` variants, baseline selection with positioned descendants,
+`vertical-align` variants beyond the top/bottom support below, baseline selection with positioned descendants,
 oversized atomic boxes, nested fixed-position overlays, and full mixed-flow
 layout need further validation and implementation.
 
@@ -90,3 +90,17 @@ the text after a zero-sized border box with padding. These additions were
 verified through layout geometry tests; no new visual-parity score is claimed
 for them. Normative references: [CSS Sizing 3](https://www.w3.org/TR/css-sizing-3/)
 and [CSS Sizing 4](https://www.w3.org/TR/css-sizing-4/).
+
+## Top and bottom inline alignment
+
+Atomic inline boxes now apply `vertical-align: top` and `bottom` when measuring
+and painting a line. Their height constrains the line edges rather than their
+internal text baseline. Tests cover exact document coordinates beside a taller
+baseline-aligned box, isolated edge alignment, and combined top/bottom boxes
+without excess line height. These are geometry tests, not a new browser-parity
+measurement. Reference: [CSS line height calculations](https://www.w3.org/TR/CSS22/visudet.html#line-height).
+
+`middle`, independent `text-top`/`text-bottom` semantics, super/subscript offsets,
+and arbitrary length/percentage vertical alignment still require work. The
+current parser aliases `text-top`/`text-bottom` to `top`/`bottom`; that is not a
+claim that those CSS values are equivalent.
