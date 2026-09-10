@@ -12,7 +12,7 @@ checks = {
         "[vertical, horizontal]",
         "[top, horizontal, bottom]",
         "[top, right, bottom, left]",
-        "parse_box_shorthand_with_rem(&value, rem_base_pt)",
+        "parse_box_shorthand_with_rem(&value, length_context)",
     ],
     FIXTURE: [
         "margin: 24px 48px 12px 96px",

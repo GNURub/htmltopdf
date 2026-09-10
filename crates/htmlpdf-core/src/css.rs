@@ -43,27 +43,27 @@ impl Color {
                 a: 0.0,
             }),
             "red" => Some(Self {
-                r: 0.86,
-                g: 0.08,
-                b: 0.08,
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
                 a: 1.0,
             }),
             "green" => Some(Self {
                 r: 0.0,
-                g: 0.5,
+                g: 128.0 / 255.0,
                 b: 0.0,
                 a: 1.0,
             }),
             "blue" => Some(Self {
                 r: 0.0,
-                g: 0.2,
-                b: 0.8,
+                g: 0.0,
+                b: 1.0,
                 a: 1.0,
             }),
             "gray" | "grey" => Some(Self {
-                r: 0.5,
-                g: 0.5,
-                b: 0.5,
+                r: 128.0 / 255.0,
+                g: 128.0 / 255.0,
+                b: 128.0 / 255.0,
                 a: 1.0,
             }),
             "slate" => Some(Self {
@@ -301,6 +301,8 @@ pub struct ComputedStyle {
     pub max_height: Option<CssLength>,
     pub aspect_ratio: Option<f32>,
     pub position: Position,
+    pub float: FloatSide,
+    pub clear: ClearSide,
     pub z_index: Option<i32>,
     pub inset_top: Option<CssLength>,
     pub inset_right: Option<CssLength>,
@@ -334,6 +336,7 @@ pub struct ComputedStyle {
     pub font_face: FontFace,
     pub letter_spacing: f32,
     pub word_spacing: f32,
+    pub tab_size: TabSize,
     pub text_decoration: TextDecoration,
     pub text_decoration_color: Option<Color>,
     pub text_decoration_thickness: Option<f32>,
@@ -433,7 +436,7 @@ impl ComputedStyle {
         style
     }
 
-    fn inherited_from(parent: &Self) -> Self {
+    pub(crate) fn inherited_from(parent: &Self) -> Self {
         let mut style = Self::default();
         style.visibility = parent.visibility;
         style.content = None;
@@ -449,6 +452,7 @@ impl ComputedStyle {
         style.font_face = parent.font_face;
         style.letter_spacing = parent.letter_spacing;
         style.word_spacing = parent.word_spacing;
+        style.tab_size = parent.tab_size;
         style.text_decoration = parent.text_decoration;
         style.text_decoration_color = parent.text_decoration_color;
         style.text_decoration_thickness = parent.text_decoration_thickness;
@@ -474,6 +478,31 @@ impl ComputedStyle {
             return;
         }
         let tag = element.tag.as_str();
+        if matches!(
+            tag,
+            "a" | "abbr"
+                | "b"
+                | "cite"
+                | "code"
+                | "dfn"
+                | "em"
+                | "i"
+                | "ins"
+                | "del"
+                | "s"
+                | "strike"
+                | "small"
+                | "span"
+                | "strong"
+                | "sub"
+                | "sup"
+                | "u"
+                | "var"
+                | "mark"
+                | "label"
+        ) {
+            self.display = Display::Inline;
+        }
         match tag {
             "h1" => {
                 self.font_size = 28.0;
@@ -601,9 +630,8 @@ impl ComputedStyle {
                     "inline-flex" => self.display = Display::InlineFlex,
                     "grid" => self.display = Display::Grid,
                     "inline-grid" => self.display = Display::Grid,
-                    "block" | "inline-block" | "flow-root" | "list-item" | "table" => {
-                        self.display = Display::Block
-                    }
+                    "inline-block" => self.display = Display::InlineBlock,
+                    "block" | "flow-root" | "list-item" | "table" => self.display = Display::Block,
                     value if value.contains("flow-root") => self.display = Display::Block,
                     _ => {}
                 },
@@ -630,6 +658,39 @@ impl ComputedStyle {
                     "static" => self.position = Position::Static,
                     _ => {}
                 },
+                "float" => {
+                    self.float = match value.as_str() {
+                        "left" => FloatSide::Left,
+                        "right" => FloatSide::Right,
+                        "inline-start" => match self.direction {
+                            TextDirection::Ltr => FloatSide::Left,
+                            TextDirection::Rtl => FloatSide::Right,
+                        },
+                        "inline-end" => match self.direction {
+                            TextDirection::Ltr => FloatSide::Right,
+                            TextDirection::Rtl => FloatSide::Left,
+                        },
+                        "none" => FloatSide::None,
+                        _ => self.float,
+                    };
+                }
+                "clear" => {
+                    self.clear = match value.as_str() {
+                        "left" => ClearSide::Left,
+                        "right" => ClearSide::Right,
+                        "both" => ClearSide::Both,
+                        "inline-start" => match self.direction {
+                            TextDirection::Ltr => ClearSide::Left,
+                            TextDirection::Rtl => ClearSide::Right,
+                        },
+                        "inline-end" => match self.direction {
+                            TextDirection::Ltr => ClearSide::Right,
+                            TextDirection::Rtl => ClearSide::Left,
+                        },
+                        "none" => ClearSide::None,
+                        _ => self.clear,
+                    };
+                }
                 "z-index" => {
                     self.z_index = if value == "auto" {
                         None
@@ -942,64 +1003,78 @@ impl ComputedStyle {
                     }
                 }
                 "border-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
-                        self.border_width = value;
-                        self.border_top_width = value;
-                        self.border_right_width = value;
-                        self.border_bottom_width = value;
-                        self.border_left_width = value;
+                    if let Some([top, right, bottom, left]) =
+                        parse_border_widths(&value, length_context)
+                    {
+                        self.border_width = top;
+                        self.border_top_width = top;
+                        self.border_right_width = right;
+                        self.border_bottom_width = bottom;
+                        self.border_left_width = left;
                     }
                 }
                 "border-top-width" | "border-block-start-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_top_width = value;
                     }
                 }
                 "border-right-width" | "border-inline-end-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_right_width = value;
                     }
                 }
                 "border-bottom-width" | "border-block-end-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_bottom_width = value;
                     }
                 }
                 "border-left-width" | "border-inline-start-width" => {
-                    if let Some(value) = parse_pt_or_px_with_rem(&value, length_context) {
+                    if let Some(value) = parse_border_width(&value, length_context) {
                         self.border_left_width = value;
                     }
                 }
                 "border-block-width" => {
-                    if let Some((start, end)) = parse_two_value_axis(&value, length_context) {
+                    if let Some((start, end)) = parse_border_axis_widths(&value, length_context) {
                         self.border_top_width = start;
                         self.border_bottom_width = end;
                     }
                 }
                 "border-inline-width" => {
-                    if let Some((start, end)) = parse_two_value_axis(&value, length_context) {
+                    if let Some((start, end)) = parse_border_axis_widths(&value, length_context) {
                         self.border_left_width = start;
                         self.border_right_width = end;
                     }
                 }
                 "border-color" => {
-                    self.border_color = parse_color_or_current(&value, self.color);
-                    self.border_top_color = self.border_color;
-                    self.border_right_color = self.border_color;
-                    self.border_bottom_color = self.border_color;
-                    self.border_left_color = self.border_color;
+                    if let Some([top, right, bottom, left]) =
+                        parse_border_colors(&value, self.color)
+                    {
+                        self.border_color = Some(top);
+                        self.border_top_color = Some(top);
+                        self.border_right_color = Some(right);
+                        self.border_bottom_color = Some(bottom);
+                        self.border_left_color = Some(left);
+                    }
                 }
                 "border-top-color" | "border-block-start-color" => {
-                    self.border_top_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_top_color = Some(color);
+                    }
                 }
                 "border-right-color" | "border-inline-end-color" => {
-                    self.border_right_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_right_color = Some(color);
+                    }
                 }
                 "border-bottom-color" | "border-block-end-color" => {
-                    self.border_bottom_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_bottom_color = Some(color);
+                    }
                 }
                 "border-left-color" | "border-inline-start-color" => {
-                    self.border_left_color = parse_color_or_current(&value, self.color);
+                    if let Some(color) = parse_color_or_current(&value, self.color) {
+                        self.border_left_color = Some(color);
+                    }
                 }
                 "border-block-color" => {
                     if let Some((start, end)) = parse_two_value_colors(&value, self.color) {
@@ -1389,6 +1464,20 @@ impl ComputedStyle {
                         parse_word_spacing_with_rem(&value, self.font_size, length_context)
                     {
                         self.word_spacing = value;
+                    }
+                }
+                "tab-size" => {
+                    if let Ok(number) = value.parse::<f32>() {
+                        if number.is_finite() && number >= 0.0 {
+                            self.tab_size = TabSize::Spaces(number);
+                        }
+                    } else if !value.contains('%') {
+                        if let Some(length) = parse_css_length_with_rem(&value, length_context) {
+                            let points = length.resolve(0.0);
+                            if points.is_finite() && points >= 0.0 {
+                                self.tab_size = TabSize::Points(points);
+                            }
+                        }
                     }
                 }
                 "text-decoration" | "text-decoration-line" => {
@@ -1854,6 +1943,8 @@ impl Default for ComputedStyle {
             max_height: None,
             aspect_ratio: None,
             position: Position::Static,
+            float: FloatSide::None,
+            clear: ClearSide::None,
             z_index: None,
             inset_top: None,
             inset_right: None,
@@ -1887,6 +1978,7 @@ impl Default for ComputedStyle {
             font_face: FontFace::Sans,
             letter_spacing: 0.0,
             word_spacing: 0.0,
+            tab_size: TabSize::Spaces(8.0),
             text_decoration: TextDecoration::none(),
             text_decoration_color: None,
             text_decoration_thickness: None,
@@ -1936,6 +2028,8 @@ fn is_supported_property(property: &str) -> bool {
             | "content-visibility"
             | "clip"
             | "position"
+            | "float"
+            | "clear"
             | "z-index"
             | "isolation"
             | "inset"
@@ -2326,6 +2420,7 @@ impl CssLength {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
+    InlineBlock,
     None,
     Block,
     Inline,
@@ -2348,6 +2443,21 @@ pub enum Position {
     Absolute,
     Fixed,
     Sticky,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatSide {
+    None,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearSide {
+    None,
+    Left,
+    Right,
+    Both,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2427,6 +2537,12 @@ pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TabSize {
+    Spaces(f32),
+    Points(f32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4956,9 +5072,25 @@ fn parse_page_declarations(input: &str) -> PageStyle {
                 if value.contains("a4") {
                     page.width_pt = Some(PageOptions::A4_WIDTH_PT);
                     page.height_pt = Some(PageOptions::A4_HEIGHT_PT);
+                    if value.contains("landscape") {
+                        std::mem::swap(&mut page.width_pt, &mut page.height_pt);
+                    }
                 } else if value.contains("letter") {
                     page.width_pt = Some(612.0);
                     page.height_pt = Some(792.0);
+                    if value.contains("landscape") {
+                        std::mem::swap(&mut page.width_pt, &mut page.height_pt);
+                    }
+                } else {
+                    let dimensions = value.split_whitespace().collect::<Vec<_>>();
+                    if dimensions.len() >= 2 {
+                        if let (Some(width), Some(height)) =
+                            (parse_pt_or_px(dimensions[0]), parse_pt_or_px(dimensions[1]))
+                        {
+                            page.width_pt = Some(width.max(1.0));
+                            page.height_pt = Some(height.max(1.0));
+                        }
+                    }
                 }
             }
             "margin" => {
@@ -6890,6 +7022,48 @@ fn parse_gap_shorthand_with_rem(
     }
 }
 
+fn parse_border_width(value: &str, context: impl Into<LengthContext> + Copy) -> Option<f32> {
+    let width = match value.trim().to_ascii_lowercase().as_str() {
+        "thin" => 0.75,
+        "medium" => 2.25,
+        "thick" => 3.75,
+        _ => parse_pt_or_px_with_rem(value, context)?,
+    };
+    (width.is_finite() && width >= 0.0).then_some(width)
+}
+
+fn parse_border_axis_widths(
+    value: &str,
+    context: impl Into<LengthContext> + Copy,
+) -> Option<(f32, f32)> {
+    let parts = split_css_whitespace(value);
+    match parts.as_slice() {
+        [all] => {
+            let width = parse_border_width(all, context)?;
+            Some((width, width))
+        }
+        [start, end] => Some((
+            parse_border_width(start, context)?,
+            parse_border_width(end, context)?,
+        )),
+        _ => None,
+    }
+}
+
+fn parse_border_widths(value: &str, context: impl Into<LengthContext> + Copy) -> Option<[f32; 4]> {
+    let values = split_css_whitespace(value)
+        .into_iter()
+        .map(|part| parse_border_width(&part, context))
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
+        _ => None,
+    }
+}
+
 fn parse_two_value_axis(
     value: &str,
     length_context: impl Into<LengthContext> + Copy,
@@ -6934,6 +7108,20 @@ fn parse_two_value_lengths(
     match values.as_slice() {
         [all] => Some((all.clone(), all.clone())),
         [start, end] => Some((start.clone(), end.clone())),
+        _ => None,
+    }
+}
+
+fn parse_border_colors(value: &str, current_color: Color) -> Option<[Color; 4]> {
+    let values = split_css_whitespace(value)
+        .into_iter()
+        .map(|part| parse_color_or_current(&part, current_color))
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
         _ => None,
     }
 }
@@ -6991,11 +7179,27 @@ fn parse_border_radius_with_rem(
     length_context: impl Into<LengthContext> + Copy,
 ) -> Option<f32> {
     let length_context = length_context.into();
-    let first_radius_group = value.split('/').next()?.trim();
-    split_css_whitespace(first_radius_group)
-        .into_iter()
-        .filter_map(|part| parse_pt_or_px_with_rem(&part, length_context))
-        .next()
+    let groups = split_top_level(value, &['/']);
+    if !matches!(groups.len(), 1 | 2) {
+        return None;
+    }
+    let mut first = None;
+    for group in groups {
+        let parts = split_css_whitespace(group);
+        if !(1..=4).contains(&parts.len()) {
+            return None;
+        }
+        for part in parts {
+            let radius = parse_pt_or_px_with_rem(&part, length_context)?;
+            if !radius.is_finite() || radius < 0.0 {
+                return None;
+            }
+            first.get_or_insert(radius);
+        }
+    }
+    // The current style representation stores one circular radius. Validate
+    // all components even though independent/elliptical corners remain TODO.
+    first
 }
 
 fn parse_border_line_style(value: &str) -> Option<BorderLineStyle> {
@@ -8066,6 +8270,11 @@ fn matching_function_end(value: &str) -> Option<usize> {
 
 fn parse_hex_color(value: &str) -> Option<Color> {
     let hex = value.strip_prefix('#')?;
+    // Validate before slicing byte pairs: non-ASCII input may place a UTF-8
+    // character across a pair boundary. Signs are not CSS hex digits either.
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
     let expand = |ch: char| -> Option<u8> {
         let digit = ch.to_digit(16)? as u8;
         Some(digit * 17)
@@ -8232,6 +8441,29 @@ fn parse_named_color(value: &str) -> Option<Color> {
         "wheat" => rgb8(245, 222, 179),
         "yellow" => rgb8(255, 255, 0),
         "yellowgreen" => rgb8(154, 205, 50),
+        "darkkhaki" => rgb8(189, 183, 107),
+        "darkmagenta" => rgb8(139, 0, 139),
+        "darkolivegreen" => rgb8(85, 107, 47),
+        "darkorchid" => rgb8(153, 50, 204),
+        "darksalmon" => rgb8(233, 150, 122),
+        "darkseagreen" => rgb8(143, 188, 143),
+        "darkturquoise" => rgb8(0, 206, 209),
+        "darkviolet" => rgb8(148, 0, 211),
+        "lightseagreen" => rgb8(32, 178, 170),
+        "lightsteelblue" => rgb8(176, 196, 222),
+        "lightyellow" => rgb8(255, 255, 224),
+        "mediumaquamarine" => rgb8(102, 205, 170),
+        "mediumblue" => rgb8(0, 0, 205),
+        "mediumorchid" => rgb8(186, 85, 211),
+        "mediumpurple" => rgb8(147, 112, 219),
+        "mediumseagreen" => rgb8(60, 179, 113),
+        "mediumslateblue" => rgb8(123, 104, 238),
+        "mediumspringgreen" => rgb8(0, 250, 154),
+        "mediumturquoise" => rgb8(72, 209, 204),
+        "mediumvioletred" => rgb8(199, 21, 133),
+        "navajowhite" => rgb8(255, 222, 173),
+        "palevioletred" => rgb8(219, 112, 147),
+        "whitesmoke" => rgb8(245, 245, 245),
         _ => return None,
     })
 }
@@ -8246,21 +8478,55 @@ fn parse_rgb_color(value: &str) -> Option<Color> {
         return parse_relative_rgb_color(body);
     }
 
-    let body = body.replace(',', " ").replace('/', " ");
-    let parts = body.split_whitespace().collect::<Vec<_>>();
+    let legacy = body.contains(',');
+    let (parts, alpha) = if legacy {
+        if body.contains('/') {
+            return None;
+        }
+        let parts: Vec<_> = body.split(',').map(str::trim).collect();
+        if !matches!(parts.len(), 3 | 4) {
+            return None;
+        }
+        let percentage = parts[0].ends_with('%');
+        if parts[..3]
+            .iter()
+            .any(|part| part.ends_with('%') != percentage || *part == "none")
+        {
+            return None;
+        }
+        let alpha = match parts.get(3) {
+            Some(value) => parse_alpha_channel(value)?,
+            None => 1.0,
+        };
+        (parts[..3].to_vec(), alpha)
+    } else {
+        let mut sections = body.split('/');
+        let parts: Vec<_> = sections.next()?.split_whitespace().collect();
+        let alpha = match sections.next() {
+            Some(value) if value.trim() == "none" => 0.0,
+            Some(value) => parse_alpha_channel(value.trim())?,
+            None => 1.0,
+        };
+        if sections.next().is_some() || parts.len() != 3 {
+            return None;
+        }
+        (parts, alpha)
+    };
     let channels = parts
         .iter()
         .take(3)
         .copied()
-        .map(parse_rgb_channel)
+        .map(|value| {
+            if !legacy && value == "none" {
+                Some(0.0)
+            } else {
+                parse_rgb_channel(value)
+            }
+        })
         .collect::<Option<Vec<_>>>()?;
     if channels.len() != 3 {
         return None;
     }
-    let alpha = parts
-        .get(3)
-        .and_then(|value| parse_alpha_channel(value))
-        .unwrap_or(1.0);
     Some(Color {
         r: channels[0],
         g: channels[1],
@@ -8385,30 +8651,58 @@ fn parse_channel_calc_amount(value: &str, scale: f32) -> Option<f32> {
     value.trim().parse::<f32>().ok()
 }
 
-fn parse_rgb_channel(value: &str) -> Option<f32> {
-    if let Some(percent) = value.strip_suffix('%') {
-        return percent
-            .trim()
-            .parse::<f32>()
-            .ok()
-            .map(|v| (v / 100.0).clamp(0.0, 1.0));
+fn parse_finite_color_number(value: &str) -> Option<f32> {
+    let bytes = value.as_bytes();
+    let mut cursor = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let integer_start = cursor;
+    while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+        cursor += 1;
     }
-    value
-        .trim()
-        .parse::<f32>()
-        .ok()
-        .map(|v| (v / 255.0).clamp(0.0, 1.0))
+    let has_integer = cursor > integer_start;
+    if bytes.get(cursor) == Some(&b'.') {
+        cursor += 1;
+        let fraction_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == fraction_start {
+            return None;
+        }
+    } else if !has_integer {
+        return None;
+    }
+    if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
+        cursor += 1;
+        if matches!(bytes.get(cursor), Some(b'+' | b'-')) {
+            cursor += 1;
+        }
+        let exponent_start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == exponent_start {
+            return None;
+        }
+    }
+    if cursor != bytes.len() {
+        return None;
+    }
+    let number = value.parse::<f32>().ok()?;
+    number.is_finite().then_some(number)
+}
+
+fn parse_rgb_channel(value: &str) -> Option<f32> {
+    let value = value.trim();
+    let (number, scale) = value
+        .strip_suffix('%')
+        .map_or((value, 255.0), |v| (v, 100.0));
+    Some((parse_finite_color_number(number)? / scale).clamp(0.0, 1.0))
 }
 
 fn parse_alpha_channel(value: &str) -> Option<f32> {
-    if let Some(percent) = value.strip_suffix('%') {
-        return percent
-            .trim()
-            .parse::<f32>()
-            .ok()
-            .map(|v| (v / 100.0).clamp(0.0, 1.0));
-    }
-    value.trim().parse::<f32>().ok().map(|v| v.clamp(0.0, 1.0))
+    let value = value.trim();
+    let (number, scale) = value.strip_suffix('%').map_or((value, 1.0), |v| (v, 100.0));
+    Some((parse_finite_color_number(number)? / scale).clamp(0.0, 1.0))
 }
 
 fn parse_hsl_color(value: &str) -> Option<Color> {
@@ -9001,6 +9295,55 @@ fn parse_percent_unit(value: &str) -> Option<f32> {
 mod tests {
     use super::*;
     use crate::parser::parse_document;
+
+    #[test]
+    fn parses_float_and_clear_flow_properties() {
+        let document = parse_document(
+            r#"<div class="left"></div><div class="right"></div><div class="clear"></div>"#,
+        )
+        .expect("valid html");
+        let stylesheet = Stylesheet::from_css_chunks(vec![
+            ".left { float: left; } .right { float: inline-end; direction: ltr; } .clear { clear: both; }"
+                .to_string(),
+        ]);
+
+        let left = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".left").expect("left exists"),
+        );
+        let right = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".right").expect("right exists"),
+        );
+        let clear = ComputedStyle::for_node(
+            &document,
+            &stylesheet,
+            document.query_selector(".clear").expect("clear exists"),
+        );
+
+        assert_eq!(left.float, FloatSide::Left);
+        assert_eq!(right.float, FloatSide::Right);
+        assert_eq!(clear.clear, ClearSide::Both);
+    }
+
+    #[test]
+    fn parses_custom_page_dimensions_and_landscape_orientation() {
+        let stylesheet = Stylesheet::from_css_chunks(vec![
+            "@page { size: 220pt 140pt; margin: 10pt; }".to_string(),
+        ]);
+        let page = stylesheet.page_options(PageOptions::letter());
+        assert!((page.width_pt - 220.0).abs() < 0.01);
+        assert!((page.height_pt - 140.0).abs() < 0.01);
+        assert!((page.margin_top_pt - 10.0).abs() < 0.01);
+
+        let landscape =
+            Stylesheet::from_css_chunks(vec!["@page { size: A4 landscape; }".to_string()])
+                .page_options(PageOptions::letter());
+        assert!((landscape.width_pt - PageOptions::A4_HEIGHT_PT).abs() < 0.01);
+        assert!((landscape.height_pt - PageOptions::A4_WIDTH_PT).abs() < 0.01);
+    }
 
     #[test]
     fn expands_is_and_where_selector_lists_across_all_arguments() {
@@ -10549,6 +10892,326 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn border_radius_reset_and_invalid_lists_preserve_cascade() {
+        for (value, expected) in [
+            ("0", 0.0),
+            ("2pt", 2.0),
+            ("invalid 4pt", 8.0),
+            ("4pt invalid", 8.0),
+            ("4pt / invalid", 8.0),
+            ("4pt / 2pt / 3pt", 8.0),
+            ("4pt 2pt 3pt 1pt 5pt", 8.0),
+            ("-2pt", 8.0),
+            ("NaNpt", 8.0),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border-radius:8pt;border-radius:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(style.border_radius, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn color_channel_numbers_require_finite_css_numeric_tokens() {
+        for value in [
+            "NaN", "inf", "infinity", "-inf", "1e999", "1.", "+", ".", "1e", "1e+", "1 0", "10 %",
+            "é",
+        ] {
+            assert_eq!(parse_rgb_channel(value), None, "RGB {value}");
+            assert_eq!(parse_alpha_channel(value), None, "alpha {value}");
+            assert!(Color::from_css(&format!("rgb({value} 0 0)")).is_none());
+            assert!(Color::from_css(&format!("rgb(0 0 0 / {value})")).is_none());
+        }
+        for (value, expected) in [
+            (".5", 0.5),
+            ("+5e-1", 0.5),
+            ("50%", 0.5),
+            ("-2", 0.0),
+            ("2", 1.0),
+        ] {
+            assert_eq!(parse_alpha_channel(value), Some(expected), "{value}");
+        }
+        assert_eq!(parse_rgb_channel("2.55e2"), Some(1.0));
+    }
+
+    #[test]
+    fn rgb_function_rejects_malformed_separators_channels_and_alpha() {
+        for value in [
+            "rgb(1 2 3 4)",
+            "rgb(1,2,3,4,5)",
+            "rgb(1,2,3 / 0.5)",
+            "rgb(1,,2,3)",
+            "rgb(1,2,3,é)",
+            "rgb(1 2 3 / 🦀)",
+            "rgb(1 2 3 /)",
+            "rgb(1 2 3 / .5 / .5)",
+            "rgb(10%,2,3)",
+            "rgb(none,2,3)",
+        ] {
+            assert_eq!(Color::from_css(value), None, "{value}");
+        }
+        for (value, hex) in [
+            ("rgb(255,0,0)", "#ff0000"),
+            ("rgba(100%,0%,0%,50%)", "#ff000080"),
+            ("rgb(255 0% none / none)", "#ff000000"),
+        ] {
+            let actual = Color::from_css(value).unwrap();
+            let expected = Color::from_css(hex).unwrap();
+            assert_eq!(
+                (actual.r, actual.g, actual.b),
+                (expected.r, expected.g, expected.b)
+            );
+            assert!((actual.a - expected.a).abs() < 0.003);
+        }
+    }
+
+    #[test]
+    fn malformed_hex_colors_are_rejected_without_panicking() {
+        for character in ['é', '€', '🦀', '\0', '+', '-', 'g'] {
+            for before in 0..9 {
+                for after in 0..9 {
+                    let value = format!("#{}{character}{}", "a".repeat(before), "b".repeat(after));
+                    assert_eq!(Color::from_css(&value), None, "{value:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hex_color_forms_have_identical_channels_and_alpha() {
+        for (short, long) in [
+            ("#abc", "#aabbcc"),
+            ("#abcd", "#aabbccdd"),
+            ("#ABC", "#aabbcc"),
+            ("#1230", "#11223300"),
+        ] {
+            assert!(Color::from_css(short).is_some());
+            assert_eq!(Color::from_css(short), Color::from_css(long));
+        }
+        for value in [
+            "#",
+            "#1",
+            "#12",
+            "#12345",
+            "#1234567",
+            "#123456789",
+            "#+f0000",
+        ] {
+            assert_eq!(Color::from_css(value), None, "{value}");
+        }
+    }
+
+    #[test]
+    fn all_standard_named_colors_match_the_reference_table() {
+        let reference = include_str!("../tests/data/css-named-colors.txt");
+        let mut names = BTreeSet::new();
+        for line in reference
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.is_empty())
+        {
+            let (name, hex) = line.split_once(' ').unwrap();
+            assert!(names.insert(name), "duplicate {name}");
+            let expected = Color::from_css(hex).unwrap();
+            assert_eq!(Color::from_css(name), Some(expected), "{name}");
+            assert_eq!(
+                Color::from_css(&name.to_ascii_uppercase()),
+                Some(expected),
+                "uppercase {name}"
+            );
+        }
+        assert_eq!(names.len(), 148);
+    }
+
+    #[test]
+    fn basic_named_colors_match_their_srgb_hex_values() {
+        for (name, hex) in [
+            ("red", "#ff0000"),
+            ("blue", "#0000ff"),
+            ("green", "#008000"),
+            ("gray", "#808080"),
+            ("grey", "#808080"),
+        ] {
+            assert_eq!(Color::from_css(name), Color::from_css(hex), "{name}");
+        }
+    }
+
+    #[test]
+    fn invalid_border_color_longhands_preserve_each_side() {
+        let document = parse_document("<div class='target'>box</div>").unwrap();
+        for properties in [
+            [
+                "border-top-color",
+                "border-right-color",
+                "border-bottom-color",
+                "border-left-color",
+            ],
+            [
+                "border-block-start-color",
+                "border-inline-end-color",
+                "border-block-end-color",
+                "border-inline-start-color",
+            ],
+        ] {
+            let invalid = properties
+                .map(|property| format!("{property}:invalid;"))
+                .join("");
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border:2pt solid black;border-color:red blue green white;{invalid}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_color,
+                    style.border_right_color,
+                    style.border_bottom_color,
+                    style.border_left_color
+                ],
+                ["red", "blue", "green", "white"].map(Color::from_css)
+            );
+        }
+    }
+
+    #[test]
+    fn expands_border_color_components_without_losing_previous_valid_colors() {
+        for (value, expected) in [
+            ("red", ["red"; 4]),
+            ("red blue", ["red", "blue", "red", "blue"]),
+            ("red blue green", ["red", "blue", "green", "blue"]),
+            (
+                "red blue green transparent",
+                ["red", "blue", "green", "transparent"],
+            ),
+            (
+                "rgb(255, 0, 0) currentColor",
+                ["red", "purple", "red", "purple"],
+            ),
+            ("red invalid", ["black"; 4]),
+            ("red blue green white black", ["black"; 4]),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{color:purple;border:2pt solid black;border-color:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_color,
+                    style.border_right_color,
+                    style.border_bottom_color,
+                    style.border_left_color
+                ],
+                expected.map(Color::from_css),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn border_width_longhands_share_keyword_and_invalid_value_handling() {
+        for (property, affected) in [
+            ("border-top-width", vec![0]),
+            ("border-right-width", vec![1]),
+            ("border-bottom-width", vec![2]),
+            ("border-left-width", vec![3]),
+            ("border-block-start-width", vec![0]),
+            ("border-inline-end-width", vec![1]),
+            ("border-block-end-width", vec![2]),
+            ("border-inline-start-width", vec![3]),
+            ("border-block-width", vec![0, 2]),
+            ("border-inline-width", vec![3, 1]),
+        ] {
+            for (value, width) in [
+                ("THICK", 3.75),
+                ("0", 0.0),
+                ("calc(2pt + 1pt)", 3.0),
+                ("-1pt", 7.0),
+                ("NaNpt", 7.0),
+                ("10%", 7.0),
+            ] {
+                let document = parse_document("<div class='target'>box</div>").unwrap();
+                let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                    ".target {{border:7pt solid black;{property}:{value}}}"
+                )]);
+                let style = ComputedStyle::for_node(
+                    &document,
+                    &stylesheet,
+                    document.query_selector(".target").unwrap(),
+                );
+                let mut expected = [7.0; 4];
+                for side in &affected {
+                    expected[*side] = width;
+                }
+                assert_eq!(
+                    [
+                        style.border_top_width,
+                        style.border_right_width,
+                        style.border_bottom_width,
+                        style.border_left_width
+                    ],
+                    expected,
+                    "{property}:{value}"
+                );
+            }
+        }
+        assert_eq!(
+            parse_border_axis_widths("thin thick", 12.0),
+            Some((0.75, 3.75))
+        );
+        assert_eq!(parse_border_axis_widths("thin -1pt", 12.0), None);
+        assert_eq!(parse_border_axis_widths("thin medium thick", 12.0), None);
+    }
+
+    #[test]
+    fn expands_border_width_components_and_rejects_invalid_lists() {
+        for (value, expected) in [
+            ("1pt", [1.0; 4]),
+            ("1pt 2pt", [1.0, 2.0, 1.0, 2.0]),
+            ("1pt 2pt 3pt", [1.0, 2.0, 3.0, 2.0]),
+            ("1pt 2pt 3pt 0", [1.0, 2.0, 3.0, 0.0]),
+            ("thin medium thick", [0.75, 2.25, 3.75, 2.25]),
+            ("calc(1pt + 2pt) 4pt", [3.0, 4.0, 3.0, 4.0]),
+            ("1pt -2pt", [7.0; 4]),
+            ("1pt 20%", [7.0; 4]),
+            ("1pt 2pt 3pt 4pt 5pt", [7.0; 4]),
+            ("NaNpt", [7.0; 4]),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border:7pt solid black;border-width:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(
+                [
+                    style.border_top_width,
+                    style.border_right_width,
+                    style.border_bottom_width,
+                    style.border_left_width
+                ],
+                expected,
+                "{value}"
+            );
+        }
     }
 
     #[test]

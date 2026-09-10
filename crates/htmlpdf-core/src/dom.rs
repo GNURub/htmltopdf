@@ -136,7 +136,11 @@ impl Document {
     }
 
     fn append_text_with_space(out: &mut String, text: &str) {
-        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let normalized = text
+            .split(|character| matches!(character, ' ' | '\t' | '\r' | '\n' | '\u{000c}'))
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         if normalized.is_empty() {
             return;
         }

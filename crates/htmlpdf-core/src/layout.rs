@@ -1,9 +1,10 @@
 use crate::css::{
     AlignItems, BackgroundClip, BackgroundSize, BorderCollapse, BorderLineStyle, BoxShadow,
-    BoxSizing, Color, ComputedStyle, Display, FlexDirection, FlexWrap, FontFace, FontStyle,
-    FontWeight, GradientStop, GridTrack, JustifyContent, LinearGradient, ListStyleType, ObjectFit,
-    OverflowWrap, Position, PseudoElement, RadialGradient, Stylesheet, TextAlign, TextDecoration,
-    TextOverflow, TextTransform, TextWrapStyle, VerticalAlign, Visibility, WhiteSpace,
+    BoxSizing, ClearSide, Color, ComputedStyle, Display, FlexDirection, FlexWrap, FloatSide,
+    FontFace, FontStyle, FontWeight, GradientStop, GridTrack, JustifyContent, LinearGradient,
+    ListStyleType, ObjectFit, OverflowWrap, Position, PseudoElement, RadialGradient, Stylesheet,
+    TextAlign, TextDecoration, TextOverflow, TextTransform, TextWrapStyle, VerticalAlign,
+    Visibility, WhiteSpace,
 };
 use crate::dom::{Document, ElementNode, Node, NodeId};
 use crate::{PageOptions, RenderMode, RenderOptions};
@@ -209,6 +210,12 @@ struct LayoutContext<'a> {
     containing_blocks: Vec<ContainingBlock>,
     suppress_positioning: bool,
     suppress_keep_with_next: bool,
+    suppress_floats: bool,
+    suppress_pagination: bool,
+    floats: Vec<ActiveFloat>,
+    float_base_left: f32,
+    float_base_right: f32,
+    fixed_overlays: Vec<Vec<LayoutItem>>,
     style_cache: BTreeMap<NodeId, ComputedStyle>,
 }
 
@@ -218,6 +225,28 @@ struct ContainingBlock {
     top: f32,
     width: f32,
     height: f32,
+}
+
+#[derive(Clone, Copy)]
+struct ActiveFloat {
+    page_index: usize,
+    side: FloatSide,
+    bottom: f32,
+    occupied_width: f32,
+}
+
+#[derive(Clone)]
+struct FlowTextLine {
+    text: String,
+    inset_left: f32,
+    available_width: f32,
+}
+
+#[derive(Clone)]
+struct FlowInlineLine {
+    segments: Vec<InlineTextSegment>,
+    inset_left: f32,
+    available_width: f32,
 }
 
 #[derive(Clone)]
@@ -240,6 +269,15 @@ struct PreparedLine {
 struct InlineTextSegment {
     text: String,
     style: ComputedStyle,
+    atomic: Option<std::rc::Rc<InlineAtomicBox>>,
+}
+
+#[derive(Clone)]
+struct InlineAtomicBox {
+    items: Vec<LayoutItem>,
+    width: f32,
+    height: f32,
+    baseline: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -298,12 +336,19 @@ pub fn layout_document(
         containing_blocks: Vec::new(),
         suppress_positioning: false,
         suppress_keep_with_next: false,
+        suppress_floats: false,
+        suppress_pagination: false,
+        floats: Vec::new(),
+        float_base_left: 0.0,
+        float_base_right: 0.0,
+        fixed_overlays: Vec::new(),
         style_cache: BTreeMap::new(),
     };
 
     for child in document.children(document.root()) {
-        context.layout_node(*child);
+        context.layout_flow_child(*child, 0.0, 0.0);
     }
+    context.append_fixed_overlays();
     prepend_document_background(document, stylesheet, options, &mut context.pages);
     append_print_margin_masks(&mut context.pages);
 
@@ -391,8 +436,19 @@ impl<'a> LayoutContext<'a> {
         style: &ComputedStyle,
     ) -> bool {
         matches!(style.display, Display::Block | Display::Inline)
-            && self.has_inline_generated_pseudo(id, style)
+            && (self.has_inline_generated_pseudo(id, style) || self.has_inline_atomic_child(id))
             && self.container_children_are_text_inline(id)
+    }
+
+    fn has_inline_atomic_child(&mut self, id: NodeId) -> bool {
+        self.document.children(id).iter().copied().any(|child| {
+            matches!(self.document.node(child), Some(Node::Element(_)))
+                && match self.computed_style(child).display {
+                    Display::InlineBlock => true,
+                    Display::Inline => self.has_inline_atomic_child(child),
+                    _ => false,
+                }
+        })
     }
 
     fn container_children_are_text_inline(&mut self, id: NodeId) -> bool {
@@ -408,13 +464,304 @@ impl<'a> LayoutContext<'a> {
                 {
                     true
                 }
-                Some(Node::Element(element)) if is_text_aggregation_tag(&element.tag) => {
+                Some(Node::Element(_)) => {
                     let child_style = self.computed_style(child);
-                    child_style.display != Display::None
-                        && matches!(child_style.display, Display::Inline | Display::InlineFlex)
+                    child_style.display == Display::None
+                        || (child_style.display == Display::InlineBlock
+                            && child_style.float == FloatSide::None
+                            && !is_out_of_flow_position(&child_style))
+                        || (child_style.display == Display::Inline
+                            && child_style.float == FloatSide::None
+                            && !is_out_of_flow_position(&child_style)
+                            && self.container_children_are_text_inline(child))
                 }
                 _ => false,
             })
+    }
+
+    fn layout_flow_child(&mut self, id: NodeId, base_left: f32, base_right: f32) {
+        self.reflow_floats(base_left, base_right);
+        let child_style = match self.document.node(id) {
+            Some(Node::Element(_)) => Some(self.computed_style(id)),
+            _ => None,
+        };
+        if let Some(style) = child_style.as_ref() {
+            if style.clear != ClearSide::None
+                && !is_out_of_flow_position(style)
+                && style.display != Display::None
+            {
+                self.clear_floats(style.clear);
+                self.reflow_floats(base_left, base_right);
+            }
+            if style.float != FloatSide::None
+                && !is_out_of_flow_position(style)
+                && style.display != Display::None
+            {
+                self.layout_float(id, style, base_left, base_right);
+                return;
+            }
+        }
+        self.layout_node(id);
+    }
+
+    fn layout_float(&mut self, id: NodeId, style: &ComputedStyle, base_left: f32, base_right: f32) {
+        self.reflow_floats(base_left, base_right);
+        let page_content_width = (self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt)
+            .max(0.0);
+        let occupied_left = self.float_occupied_width(FloatSide::Left);
+        let occupied_right = self.float_occupied_width(FloatSide::Right);
+        let available_width =
+            (page_content_width - base_left - base_right - occupied_left - occupied_right).max(0.0);
+        let margin_width = style.margin_left + style.margin_right;
+        let box_width = if style.width.is_some() {
+            resolve_flow_horizontal_geometry(style, available_width)
+                .box_width
+                .min((available_width - margin_width).max(0.0))
+        } else {
+            (self.intrinsic_inline_width(id, available_width) - margin_width)
+                .max(0.0)
+                .min((available_width - margin_width).max(0.0))
+        };
+        let remaining = (available_width - box_width - margin_width).max(0.0);
+        let (temporary_left, temporary_right) = match style.float {
+            FloatSide::Left => (
+                base_left + occupied_left,
+                base_right + occupied_right + remaining,
+            ),
+            FloatSide::Right => (
+                base_left + occupied_left + remaining,
+                base_right + occupied_right,
+            ),
+            FloatSide::None => return,
+        };
+
+        let start_page = self.pages.len().saturating_sub(1);
+        let start_y = self.current_y;
+        let previous_left = self.inset_left;
+        let previous_right = self.inset_right;
+        let previous_suppress = self.suppress_floats;
+        self.inset_left = temporary_left;
+        self.inset_right = temporary_right;
+        self.suppress_floats = true;
+        if matches!(self.document.node(id), Some(Node::Element(element)) if is_text_aggregation_tag(&element.tag))
+        {
+            let snapshot = self.paint_snapshot();
+            self.layout_container(id, style);
+            if style.visibility != Visibility::Visible {
+                self.restore_paint_snapshot(snapshot);
+            }
+        } else {
+            self.layout_node(id);
+        }
+        self.suppress_floats = previous_suppress;
+        let float_page = self.pages.len().saturating_sub(1);
+        let float_bottom = self.current_y;
+        let float_top = if float_page == start_page {
+            start_y
+        } else {
+            self.options.page.height_pt - self.options.page.margin_top_pt
+        };
+        self.current_y = float_top;
+        self.inset_left = previous_left;
+        self.inset_right = previous_right;
+
+        if box_width > 0.0 && float_bottom < float_top {
+            self.floats.push(ActiveFloat {
+                page_index: float_page,
+                side: style.float,
+                bottom: float_bottom,
+                occupied_width: box_width + margin_width,
+            });
+        }
+        self.reflow_floats(base_left, base_right);
+    }
+
+    fn clear_floats(&mut self, clear: ClearSide) {
+        self.remove_expired_floats();
+        let bottom = self
+            .floats
+            .iter()
+            .filter(|float| match clear {
+                ClearSide::None => false,
+                ClearSide::Left => float.side == FloatSide::Left,
+                ClearSide::Right => float.side == FloatSide::Right,
+                ClearSide::Both => true,
+            })
+            .map(|float| float.bottom)
+            .min_by(f32::total_cmp);
+        if let Some(bottom) = bottom {
+            self.current_y = self.current_y.min(bottom);
+            self.ensure_space(0.0);
+        }
+    }
+
+    fn remove_expired_floats(&mut self) {
+        let page_index = self.pages.len().saturating_sub(1);
+        let current_y = self.current_y;
+        self.floats
+            .retain(|float| float.page_index == page_index && float.bottom < current_y - 0.01);
+    }
+
+    fn float_occupied_width(&self, side: FloatSide) -> f32 {
+        self.floats
+            .iter()
+            .filter(|float| float.side == side)
+            .map(|float| float.occupied_width)
+            .sum()
+    }
+
+    fn reflow_floats(&mut self, base_left: f32, base_right: f32) {
+        if self.suppress_floats {
+            self.inset_left = base_left;
+            self.inset_right = base_right;
+            return;
+        }
+        self.remove_expired_floats();
+        self.inset_left = base_left + self.float_occupied_width(FloatSide::Left);
+        self.inset_right = base_right + self.float_occupied_width(FloatSide::Right);
+    }
+
+    fn float_occupied_width_at_y(&self, page_index: usize, y: f32, side: FloatSide) -> f32 {
+        if self.suppress_floats {
+            return 0.0;
+        }
+        self.floats
+            .iter()
+            .filter(|float| {
+                float.page_index == page_index && float.side == side && float.bottom < y - 0.01
+            })
+            .map(|float| float.occupied_width)
+            .sum()
+    }
+
+    fn wrap_text_with_floats(
+        &self,
+        text: &str,
+        style: &ComputedStyle,
+        base_left: f32,
+        base_right: f32,
+    ) -> Vec<FlowTextLine> {
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut remaining = normalize_text_for_flow(text, style.white_space);
+        let mut y = self.current_y;
+        let line_height = layout_line_height(style).max(0.01);
+        let mut output = Vec::new();
+
+        while !remaining.is_empty() {
+            if !self.suppress_pagination && y < self.options.page.margin_bottom_pt + line_height {
+                page_index += 1;
+                y = self.options.page.height_pt - self.options.page.margin_top_pt;
+            }
+            let occupied_left = self.float_occupied_width_at_y(page_index, y, FloatSide::Left);
+            let occupied_right = self.float_occupied_width_at_y(page_index, y, FloatSide::Right);
+            let inset_left = base_left + occupied_left;
+            let inset_right = base_right + occupied_right;
+            let raw_available_width = (self.options.page.width_pt
+                - self.options.page.margin_left_pt
+                - self.options.page.margin_right_pt
+                - inset_left
+                - inset_right)
+                .max(0.0);
+            let available_width = if style.width.is_some()
+                || style.min_width.is_some()
+                || style.max_width.is_some()
+            {
+                resolve_box_width(style, raw_available_width)
+            } else {
+                raw_available_width
+            };
+            let wrapped = wrap_text_with_style(&remaining, style, available_width);
+            if wrapped.is_empty() {
+                break;
+            }
+            output.push(FlowTextLine {
+                text: wrapped[0].clone(),
+                inset_left,
+                available_width,
+            });
+            y -= line_height;
+            if wrapped.len() == 1 {
+                break;
+            }
+            let next_remaining = advance_wrapped_text(&remaining, &wrapped[0]);
+            if next_remaining.is_empty() {
+                break;
+            }
+            remaining = next_remaining;
+        }
+
+        output
+    }
+
+    fn wrap_inline_segments_with_floats(
+        &self,
+        segments: &[InlineTextSegment],
+        style: &ComputedStyle,
+        base_left: f32,
+        base_right: f32,
+    ) -> Vec<FlowInlineLine> {
+        let tokens = tokenize_inline_segments(segments);
+        let mut cursor = 0usize;
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut y = self.current_y;
+        let line_height = layout_line_height(style).max(0.01);
+        let mut output = Vec::new();
+
+        while cursor < tokens.len() {
+            if !self.suppress_pagination && y < self.options.page.margin_bottom_pt + line_height {
+                page_index += 1;
+                y = self.options.page.height_pt - self.options.page.margin_top_pt;
+            }
+
+            let occupied_left = self.float_occupied_width_at_y(page_index, y, FloatSide::Left);
+            let occupied_right = self.float_occupied_width_at_y(page_index, y, FloatSide::Right);
+            let inset_left = base_left + occupied_left;
+            let inset_right = base_right + occupied_right;
+            let raw_available_width = (self.options.page.width_pt
+                - self.options.page.margin_left_pt
+                - self.options.page.margin_right_pt
+                - inset_left
+                - inset_right)
+                .max(0.0);
+            let available_width = if style.width.is_some()
+                || style.min_width.is_some()
+                || style.max_width.is_some()
+            {
+                resolve_box_width(style, raw_available_width)
+            } else {
+                raw_available_width
+            };
+            let (line, next_cursor) = wrap_one_inline_line(
+                &tokens,
+                cursor,
+                available_width,
+                style.white_space == WhiteSpace::NoWrap,
+            );
+            if next_cursor <= cursor {
+                break;
+            }
+            let (_, actual_height) = inline_line_metrics(&line, style);
+            let page_top = self.options.page.height_pt - self.options.page.margin_top_pt;
+            if !self.suppress_pagination
+                && y < page_top - 0.01
+                && y < self.options.page.margin_bottom_pt + actual_height
+            {
+                page_index += 1;
+                y = page_top;
+                continue;
+            }
+            output.push(FlowInlineLine {
+                segments: line,
+                inset_left,
+                available_width,
+            });
+            cursor = next_cursor;
+            y -= actual_height;
+        }
+
+        output
     }
 
     fn layout_node(&mut self, id: NodeId) {
@@ -457,11 +804,24 @@ impl<'a> LayoutContext<'a> {
                         _ => None,
                     })
                     .unwrap_or_default();
-                self.layout_text_block(text, &style);
+                // A text node produces an anonymous box, not another copy of
+                // its parent's dimensions, background or positioning.
+                let mut text_style = ComputedStyle::inherited_from(&style);
+                text_style.transform_rotate_deg = 0.0;
+                self.layout_text_block(text, &text_style);
             }
             Node::Element(element) => {
                 let style = self.computed_style(id);
                 if style.display == Display::None {
+                    return;
+                }
+                if !self.suppress_floats
+                    && style.float != FloatSide::None
+                    && !is_out_of_flow_position(&style)
+                {
+                    let base_left = self.float_base_left;
+                    let base_right = self.float_base_right;
+                    self.layout_float(id, &style, base_left, base_right);
                     return;
                 }
                 if !self.suppress_positioning && is_out_of_flow_position(&style) {
@@ -550,7 +910,7 @@ impl<'a> LayoutContext<'a> {
                 }
 
                 if self.should_layout_container_as_inline_text(id, &style) {
-                    self.layout_inline_text_block(id, &style);
+                    self.layout_avoid_or_container(id, &style);
                     if style.page_break_after {
                         self.force_page_break();
                     }
@@ -654,11 +1014,16 @@ impl<'a> LayoutContext<'a> {
         self.inset_left = inset_left;
         self.inset_right = inset_right;
         self.suppress_positioning = true;
+        let overlay_page_index = self.pages.len().saturating_sub(1);
+        let overlay_item_start = self.pages[overlay_page_index].items.len();
         self.layout_node(id);
         self.suppress_positioning = previous_suppress;
         self.current_y = previous_y;
         self.inset_left = previous_left;
         self.inset_right = previous_right;
+        if style.position == Position::Fixed {
+            self.register_fixed_overlay(overlay_page_index, overlay_item_start);
+        }
     }
 
     fn positioned_node_width(
@@ -801,6 +1166,8 @@ impl<'a> LayoutContext<'a> {
 
         self.ensure_space(box_height + style.margin_bottom);
         let box_x = self.options.page.margin_left_pt + self.inset_left + style.margin_left;
+        let page_index = self.pages.len().saturating_sub(1);
+        let insert_index = self.pages[page_index].items.len();
         let box_y = self.current_y - box_height;
         let content_x = box_x + style.padding_left;
         let content_y = box_y + style.padding_bottom;
@@ -848,6 +1215,15 @@ impl<'a> LayoutContext<'a> {
             self.push(LayoutItem::EndClip);
         }
         self.push_container_decoration(box_x, box_y, box_width, box_height, style);
+        self.apply_style_transform_to_range(
+            page_index,
+            insert_index,
+            box_x,
+            box_y,
+            box_width,
+            box_height,
+            style,
+        );
         self.current_y -= box_height + style.margin_bottom;
     }
 
@@ -856,8 +1232,6 @@ impl<'a> LayoutContext<'a> {
             self.current_y -= style.margin_top;
         }
 
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
         let available_width = (self.options.page.width_pt
             - self.options.page.margin_left_pt
             - self.options.page.margin_right_pt
@@ -877,6 +1251,8 @@ impl<'a> LayoutContext<'a> {
 
         self.ensure_space(box_height + style.margin_bottom);
         let x = self.options.page.margin_left_pt + self.inset_left + style.margin_left;
+        let page_index = self.pages.len().saturating_sub(1);
+        let insert_index = self.pages[page_index].items.len();
         let y = self.current_y - box_height;
         let disabled = element.attr("disabled").is_some();
         let control_type = form_control_type(element);
@@ -998,7 +1374,23 @@ impl<'a> LayoutContext<'a> {
                     .with_opacity(style.opacity),
                 }));
             }
-            Some("textarea") | Some("button") | Some("submit") | Some("reset") => {
+            Some("textarea") => {
+                if let Some(text) = form_control_text(self.document, id, element) {
+                    self.push_textarea_text(
+                        &text,
+                        style,
+                        x,
+                        y,
+                        box_width,
+                        box_height,
+                        disabled,
+                        element
+                            .attr("wrap")
+                            .is_some_and(|value| value.eq_ignore_ascii_case("off")),
+                    );
+                }
+            }
+            Some("button") | Some("submit") | Some("reset") => {
                 if let Some(text) = form_control_text(self.document, id, element) {
                     self.push_form_control_text(
                         &text, style, x, y, box_width, box_height, disabled,
@@ -1026,6 +1418,90 @@ impl<'a> LayoutContext<'a> {
             style,
         );
         self.current_y -= box_height + style.margin_bottom;
+    }
+
+    fn push_textarea_text(
+        &mut self,
+        text: &str,
+        style: &ComputedStyle,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        disabled: bool,
+        no_wrap: bool,
+    ) {
+        let left = style.padding_left.max(4.0);
+        let right = style.padding_right.max(4.0);
+        let top = style.padding_top.max(4.0);
+        let bottom = style.padding_bottom.max(4.0);
+        let content_width = (width - left - right).max(0.0);
+        let content_height = (height - top - bottom).max(0.0);
+        if content_width <= 0.0 || content_height <= 0.0 {
+            return;
+        }
+        self.push(LayoutItem::BeginClip(ClipRect {
+            x: x + left,
+            y: y + bottom,
+            width: content_width,
+            height: content_height,
+            radius: 0.0,
+        }));
+        let mut baseline = y + height - top - style.font_size;
+        let transformed = transform_text(text, style.text_transform);
+        let line_height = layout_line_height(style).max(0.01);
+        let visible_lines = (content_height / line_height).ceil() as usize;
+        // Include one extra line for floating-point edge rounding; the clip
+        // and baseline check below still determine what is actually painted.
+        for line in wrap_textarea_lines_bounded(
+            &transformed,
+            style,
+            content_width,
+            no_wrap,
+            visible_lines.saturating_add(1),
+        ) {
+            if baseline + style.font_size <= y + bottom {
+                break;
+            }
+            let mut advance = 0.0;
+            for (part_index, part) in line.split('\t').enumerate() {
+                if part_index > 0 {
+                    advance += textarea_tab_advance(style, advance);
+                }
+                if part.is_empty() {
+                    continue;
+                }
+                self.push(LayoutItem::Text(TextRun {
+                    x: x + left + advance,
+                    y: baseline,
+                    text: part.to_string(),
+                    font_size: style.font_size,
+                    color: (if disabled { rgb(0x6b7280) } else { style.color })
+                        .with_opacity(style.opacity),
+                    font_weight: style.font_weight,
+                    font_style: style.font_style,
+                    font_face: style.font_face,
+                    letter_spacing: style.letter_spacing,
+                    word_spacing: style.word_spacing,
+                    text_decoration: style.text_decoration,
+                    text_decoration_color: style.text_decoration_color,
+                    text_decoration_thickness: style.text_decoration_thickness,
+                    text_underline_offset: style.text_underline_offset,
+                    rotation_deg: 0.0,
+                    text_shadow: style.text_shadow,
+                }));
+                advance += estimate_text_width_with_spacing(
+                    part,
+                    style.font_size,
+                    style.font_face,
+                    style.font_weight,
+                    style.letter_spacing,
+                    style.word_spacing,
+                );
+            }
+            baseline -= line_height;
+        }
+        self.push(LayoutItem::EndClip);
     }
 
     fn push_form_control_text(
@@ -1116,30 +1592,24 @@ impl<'a> LayoutContext<'a> {
         } else {
             vec![0..children.len()]
         };
-        let estimated_row_height = style.padding_top
-            + style.padding_bottom
-            + line_ranges
-                .iter()
-                .enumerate()
-                .map(|(line_idx, range)| {
-                    let line_height = range
-                        .clone()
-                        .map(|idx| {
-                            self.estimated_inline_block_height(
-                                children[idx],
-                                base_child_widths.get(idx).copied().unwrap_or(0.0),
-                            )
-                        })
-                        .fold(0.0_f32, f32::max);
-                    line_height
-                        + if line_idx + 1 < line_ranges.len() {
-                            style.row_gap
-                        } else {
-                            0.0
-                        }
-                })
-                .sum::<f32>();
-        self.ensure_space(estimated_row_height);
+        let line_estimates = line_ranges
+            .iter()
+            .map(|range| {
+                range
+                    .clone()
+                    .map(|idx| {
+                        self.estimated_inline_block_height(
+                            children[idx],
+                            base_child_widths.get(idx).copied().unwrap_or(0.0),
+                        )
+                    })
+                    .fold(0.0_f32, f32::max)
+            })
+            .collect::<Vec<_>>();
+        let first_line_needed = style.padding_top
+            + line_estimates.first().copied().unwrap_or(0.0)
+            + style.padding_bottom;
+        self.ensure_space(first_line_needed.max(first_fragment_min_height(style)));
 
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
@@ -1154,6 +1624,17 @@ impl<'a> LayoutContext<'a> {
             let line_len = range.end.saturating_sub(range.start);
             if line_len == 0 {
                 continue;
+            }
+            if line_idx > 0 {
+                self.current_y = line_top;
+                let page_count_before = self.pages.len();
+                let line_needed = line_estimates.get(line_idx).copied().unwrap_or(0.0)
+                    + style.row_gap
+                    + style.padding_bottom;
+                self.ensure_space(line_needed.max(first_fragment_min_height(style)));
+                if self.pages.len() != page_count_before {
+                    line_top = self.current_y;
+                }
             }
             let mut line_widths = if style.flex_wrap == FlexWrap::Wrap {
                 base_child_widths[range.clone()].to_vec()
@@ -1540,6 +2021,40 @@ impl<'a> LayoutContext<'a> {
                 );
                 width + inline_measurement_slack(&style)
             }
+            Some(Node::Element(element)) if element.tag == "img" => {
+                let style = self.computed_style(id);
+                let Some(src) = element.attr("src") else {
+                    return 0.0;
+                };
+                let Some(intrinsic) = load_image_asset(src, self.options) else {
+                    return 0.0;
+                };
+                let intrinsic_width = intrinsic.intrinsic_width_px as f32 * 0.75;
+                let intrinsic_height = intrinsic.intrinsic_height_px as f32 * 0.75;
+                let aspect = if intrinsic_height > 0.0 {
+                    intrinsic_width / intrinsic_height
+                } else {
+                    1.0
+                };
+                let width = style
+                    .width
+                    .as_ref()
+                    .map(|width| width.resolve(available_width))
+                    .or_else(|| element.attr("width").and_then(parse_html_dimension_attr))
+                    .or_else(|| {
+                        style
+                            .height
+                            .as_ref()
+                            .map(|height| height.resolve(available_width) * aspect)
+                    })
+                    .unwrap_or(intrinsic_width.min(available_width));
+                let box_width = if style.box_sizing == BoxSizing::BorderBox {
+                    width
+                } else {
+                    width + horizontal_box_extras(&style)
+                };
+                box_width + style.margin_left + style.margin_right
+            }
             Some(Node::Element(element)) if element.tag == "svg" => {
                 let style = self.computed_style(id);
                 style
@@ -1581,9 +2096,9 @@ impl<'a> LayoutContext<'a> {
                     + style.padding_right
                     + style.margin_left
                     + style.margin_right
-                    + style.border_left_width.max(style.border_width)
-                    + style.border_right_width.max(style.border_width))
-                .min(available_width)
+                    + style.border_left_width
+                    + style.border_right_width)
+                    .min(available_width)
             }
             _ => 0.0,
         }
@@ -1693,6 +2208,7 @@ impl<'a> LayoutContext<'a> {
             return;
         }
 
+        self.ensure_space(first_fragment_min_height(style));
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
         let top_y = self.current_y;
@@ -1750,6 +2266,9 @@ impl<'a> LayoutContext<'a> {
                 let min_row_height = grid_row_track_min_height(style, row_index, row_track_base);
                 let Some(placed) = row.first() else {
                     if min_row_height > 0.0 {
+                        self.ensure_space(
+                            (min_row_height + row_gap).max(first_fragment_min_height(style)),
+                        );
                         self.current_y -= min_row_height + row_gap;
                     }
                     continue;
@@ -1769,6 +2288,9 @@ impl<'a> LayoutContext<'a> {
                     - self.options.page.margin_right_pt
                     - self.inset_left
                     - child_width;
+                let row_estimate =
+                    min_row_height.max(self.estimated_inline_block_height(placed.id, child_width));
+                self.ensure_space((row_estimate + row_gap).max(first_fragment_min_height(style)));
                 let before_child_y = self.current_y;
                 let child_page_index = self.pages.len().saturating_sub(1);
                 let item_start = self.pages[child_page_index].items.len();
@@ -1819,8 +2341,27 @@ impl<'a> LayoutContext<'a> {
 
         let mut row_ranges = Vec::new();
         for (row_index, row) in rows.into_iter().enumerate() {
-            let row_content_top = self.current_y;
             let min_row_height = grid_row_track_min_height(style, row_index, row_track_base);
+            let mut row_estimate = min_row_height;
+            for placed in &row {
+                let child_style = self.computed_style(placed.id);
+                let area_width = grid_spanned_track_width(
+                    &track_widths,
+                    placed.start_column,
+                    placed.span,
+                    effective_column_gap,
+                );
+                let (_, child_width) = self.grid_item_inline_geometry(
+                    placed.id,
+                    &child_style,
+                    area_width,
+                    style.justify_items,
+                );
+                row_estimate =
+                    row_estimate.max(self.estimated_inline_block_height(placed.id, child_width));
+            }
+            self.ensure_space((row_estimate + row_gap).max(first_fragment_min_height(style)));
+            let row_content_top = self.current_y;
             let mut max_consumed = 0.0_f32;
             let mut max_baseline_offset = 0.0_f32;
             let mut child_layouts = Vec::with_capacity(row.len());
@@ -2454,6 +2995,31 @@ impl<'a> LayoutContext<'a> {
                 } else {
                     0.0
                 };
+            let printable_height = (self.options.page.height_pt
+                - self.options.page.margin_top_pt
+                - self.options.page.margin_bottom_pt)
+                .max(0.0);
+            let has_multiple_lines = prepared.iter().any(|cell| cell.lines.len() > 1);
+            if row_height > printable_height
+                || (has_multiple_lines
+                    && row_height > self.current_y - self.options.page.margin_bottom_pt + 0.1)
+            {
+                self.layout_fragmented_table_row(
+                    table_x,
+                    &column_widths,
+                    &prepared,
+                    row_index,
+                    style,
+                    header_row
+                        .as_ref()
+                        .map(|(prepared, height)| (prepared.as_slice(), *height)),
+                    spacing_y,
+                );
+                if row_index + 1 < rows.len() {
+                    self.current_y -= spacing_y;
+                }
+                continue;
+            }
             let repeats_header = row_index > 0 && header_row.is_some();
             let needed_height = row_advance
                 + if repeats_header {
@@ -2495,6 +3061,135 @@ impl<'a> LayoutContext<'a> {
 
         if style.margin_bottom > 0.0 {
             self.current_y -= style.margin_bottom;
+        }
+    }
+
+    fn layout_fragmented_table_row(
+        &mut self,
+        table_x: f32,
+        column_widths: &[f32],
+        prepared: &[PreparedCell],
+        row_index: usize,
+        table_style: &ComputedStyle,
+        header_row: Option<(&[PreparedCell], f32)>,
+        spacing_y: f32,
+    ) {
+        let max_lines = prepared
+            .iter()
+            .map(|cell| cell.lines.len())
+            .max()
+            .unwrap_or(0);
+        if max_lines == 0 {
+            let height = table_row_height(prepared, table_style.border_collapse);
+            self.ensure_space(height);
+            self.paint_table_row(
+                table_x,
+                column_widths,
+                prepared,
+                height,
+                row_index,
+                table_style,
+                true,
+            );
+            self.current_y -= height;
+            return;
+        }
+
+        let repeats_header = row_index > 0 && header_row.is_some();
+        let initial_page = self.pages.len();
+        let mut header_page = None;
+        let mut start = 0;
+        let mut first_fragment = true;
+
+        while start < max_lines {
+            let first_height = table_row_fragment_height(
+                prepared,
+                start,
+                (start + 1).min(max_lines),
+                first_fragment,
+                start + 1 == max_lines,
+                table_style.border_collapse,
+            );
+            let mut header_just_painted = false;
+            if repeats_header
+                && self.pages.len() > initial_page
+                && header_page != Some(self.pages.len())
+            {
+                let (_, header_height) = header_row.expect("repeated table header");
+                let required = header_height + spacing_y + first_height;
+                if self.current_y < self.options.page.margin_bottom_pt + required
+                    && self.pages.last().is_some_and(|page| !page.items.is_empty())
+                {
+                    self.ensure_space(required);
+                    continue;
+                }
+                let (header_prepared, header_height) = header_row.expect("repeated table header");
+                self.paint_table_row(
+                    table_x,
+                    column_widths,
+                    header_prepared,
+                    header_height,
+                    0,
+                    table_style,
+                    false,
+                );
+                self.current_y -= header_height + spacing_y;
+                header_page = Some(self.pages.len());
+                header_just_painted = true;
+            }
+
+            let available = (self.current_y - self.options.page.margin_bottom_pt).max(0.0);
+            let mut end = start;
+            for candidate in (start + 1)..=max_lines {
+                let candidate_height = table_row_fragment_height(
+                    prepared,
+                    start,
+                    candidate,
+                    first_fragment,
+                    candidate == max_lines,
+                    table_style.border_collapse,
+                );
+                if candidate_height <= available + 0.1 {
+                    end = candidate;
+                } else {
+                    break;
+                }
+            }
+            if end == start {
+                if !header_just_painted
+                    && self.pages.last().is_some_and(|page| !page.items.is_empty())
+                {
+                    self.ensure_space(first_height);
+                    continue;
+                }
+                end = (start + 1).min(max_lines);
+            }
+
+            let last_fragment = end == max_lines;
+            let fragment_height = table_row_fragment_height(
+                prepared,
+                start,
+                end,
+                first_fragment,
+                last_fragment,
+                table_style.border_collapse,
+            );
+            self.paint_table_row_fragment(
+                table_x,
+                column_widths,
+                prepared,
+                fragment_height,
+                row_index,
+                table_style,
+                true,
+                start,
+                end,
+                first_fragment,
+                last_fragment,
+            );
+            self.current_y -= fragment_height;
+            start = end;
+            first_fragment = false;
         }
     }
 
@@ -2571,7 +3266,7 @@ impl<'a> LayoutContext<'a> {
                         if let Some(line) = lines.get_mut(first_line) {
                             line.before += child_style.margin_top
                                 + child_style.padding_top
-                                + child_style.border_top_width.max(child_style.border_width);
+                                + child_style.border_top_width;
                         }
                         if let Some(line) = lines.last_mut() {
                             line.after += child_style.margin_bottom
@@ -2623,23 +3318,56 @@ impl<'a> LayoutContext<'a> {
         table_style: &ComputedStyle,
         allow_rounded_header: bool,
     ) {
+        self.paint_table_row_fragment(
+            table_x,
+            column_widths,
+            prepared,
+            row_height,
+            row_index,
+            table_style,
+            allow_rounded_header,
+            0,
+            usize::MAX,
+            true,
+            true,
+        );
+    }
+
+    fn paint_table_row_fragment(
+        &mut self,
+        table_x: f32,
+        column_widths: &[f32],
+        prepared: &[PreparedCell],
+        row_height: f32,
+        row_index: usize,
+        table_style: &ComputedStyle,
+        allow_rounded_header: bool,
+        line_start: usize,
+        line_end: usize,
+        first_fragment: bool,
+        last_fragment: bool,
+    ) {
         let row_top = self.current_y;
         let row_bottom = row_top - row_height;
         let mut x = table_x;
         let spacing_x = table_horizontal_spacing(table_style, column_widths.len());
         let table_width = column_widths.iter().sum::<f32>()
             + spacing_x * column_widths.len().saturating_sub(1) as f32;
-        let unified_header_background =
-            if allow_rounded_header && row_index == 0 && table_style.border_radius > 0.0 {
-                prepared.first().map(|cell| {
-                    cell.style
-                        .background
-                        .unwrap_or(rgb(0xf1f5f9))
-                        .with_opacity(cell.style.opacity)
-                })
-            } else {
-                None
-            };
+        let unified_header_background = if allow_rounded_header
+            && first_fragment
+            && last_fragment
+            && row_index == 0
+            && table_style.border_radius > 0.0
+        {
+            prepared.first().map(|cell| {
+                cell.style
+                    .background
+                    .unwrap_or(rgb(0xf1f5f9))
+                    .with_opacity(cell.style.opacity)
+            })
+        } else {
+            None
+        };
         if let Some(background) = unified_header_background {
             self.push(LayoutItem::RoundRect(RoundRect {
                 x: table_x,
@@ -2676,22 +3404,41 @@ impl<'a> LayoutContext<'a> {
             }
             self.push_table_cell_border(x, row_bottom, cell_width, row_height, cell_style);
 
-            let free_space = (row_height
-                - cell_style.padding_top
-                - cell_style.padding_bottom
-                - cell.content_height)
-                .max(0.0);
-            let vertical_offset = match cell_style.vertical_align {
-                VerticalAlign::Middle => free_space / 2.0,
-                VerticalAlign::Bottom => free_space,
-                VerticalAlign::Baseline | VerticalAlign::Top => 0.0,
+            let start = line_start.min(cell.lines.len());
+            let end = line_end.min(cell.lines.len()).max(start);
+            let content_height = cell.lines[start..end]
+                .iter()
+                .map(|line| line.before + line.style.line_height + line.after)
+                .sum::<f32>();
+            let includes_top_padding = first_fragment && start == 0;
+            let includes_bottom_padding =
+                last_fragment || (start < cell.lines.len() && end >= cell.lines.len());
+            let top_padding = if includes_top_padding {
+                cell_style.padding_top
+            } else {
+                0.0
             };
-            let mut text_y =
-                row_top - cell_style.padding_top - vertical_offset - cell_style.font_size;
+            let bottom_padding = if includes_bottom_padding {
+                cell_style.padding_bottom
+            } else {
+                0.0
+            };
+            let free_space = (row_height - top_padding - bottom_padding - content_height).max(0.0);
+            let vertical_offset = if first_fragment && last_fragment {
+                match cell_style.vertical_align {
+                    VerticalAlign::Middle => free_space / 2.0,
+                    VerticalAlign::Bottom => free_space,
+                    VerticalAlign::Baseline | VerticalAlign::Top => 0.0,
+                }
+            } else {
+                0.0
+            };
+            let mut text_y = row_top - top_padding - vertical_offset - cell_style.font_size;
             let content_width =
                 (cell_width - cell_style.padding_left - cell_style.padding_right).max(8.0);
             let line_count = cell.lines.len();
-            for (line_index, line) in cell.lines.iter().enumerate() {
+            for (line_index, line) in cell.lines[start..end].iter().enumerate() {
+                let line_index = start + line_index;
                 let line_style = &line.style;
                 text_y -= line.before;
                 let text_width = estimate_text_width_with_spacing(
@@ -3100,7 +3847,11 @@ impl<'a> LayoutContext<'a> {
             self.current_y -= style.margin_top;
         }
 
-        self.ensure_space(first_fragment_min_height(style));
+        let border_top = style.border_top_width;
+        let border_bottom = style.border_bottom_width;
+        let border_left = style.border_left_width;
+        let border_right = style.border_right_width;
+        self.ensure_space(first_fragment_min_height(style) + border_top + border_bottom);
 
         let page_index = self.pages.len().saturating_sub(1);
         let insert_index = self.pages[page_index].items.len();
@@ -3124,55 +3875,84 @@ impl<'a> LayoutContext<'a> {
             });
         }
 
-        self.current_y -= style.padding_top;
+        self.current_y -= style.padding_top + border_top;
 
         let previous_left = self.inset_left;
         let previous_right = self.inset_right;
         let trailing_space = containing_width - flow.margin_left - box_width;
-        self.inset_left += flow.margin_left + style.padding_left;
-        self.inset_right += trailing_space + style.padding_right;
+        self.inset_left += flow.margin_left + style.padding_left + border_left;
+        self.inset_right += trailing_space + style.padding_right + border_right;
+        let float_base_left = self.inset_left;
+        let float_base_right = self.inset_right;
+        let previous_float_base_left = self.float_base_left;
+        let previous_float_base_right = self.float_base_right;
+        let float_scope_start = self.floats.len();
+        self.float_base_left = float_base_left;
+        self.float_base_right = float_base_right;
 
-        self.layout_generated_pseudo(id, style, PseudoElement::Before);
+        let inline_content = self.container_children_are_text_inline(id)
+            && (has_styled_inline_children(self.document, id)
+                || self.has_inline_generated_pseudo(id, style)
+                || self.has_inline_atomic_child(id));
         let mut paint_stack_ranges = Vec::new();
         let mut previous_collapsible_margin_bottom: Option<f32> = None;
-        for (source_order, child) in self.document.children(id).iter().copied().enumerate() {
-            let child_style = match self.document.node(child) {
-                Some(Node::Element(_)) => Some(self.computed_style(child)),
-                _ => None,
-            };
-            if let Some(child_style) = child_style.as_ref() {
-                if can_collapse_adjacent_sibling_margin(child_style) {
-                    if let Some(previous_margin_bottom) = previous_collapsible_margin_bottom {
-                        self.current_y +=
-                            previous_margin_bottom.min(child_style.margin_top).max(0.0);
+        if inline_content {
+            // The outer container owns the box model and transforms. Its
+            // inline formatting context only inherits text properties.
+            let mut text_style = ComputedStyle::inherited_from(style);
+            text_style.transform_rotate_deg = 0.0;
+            self.layout_inline_text_block(id, &text_style);
+        } else {
+            self.layout_generated_pseudo(id, style, PseudoElement::Before);
+            for (source_order, child) in self.document.children(id).iter().copied().enumerate() {
+                // Collapsible source whitespace is not an intervening block.
+                if matches!(self.document.node(child), Some(Node::Text(text)) if text.trim().is_empty())
+                {
+                    continue;
+                }
+                let child_style = match self.document.node(child) {
+                    Some(Node::Element(_)) => Some(self.computed_style(child)),
+                    _ => None,
+                };
+                if let Some(child_style) = child_style.as_ref() {
+                    if child_style.float == FloatSide::None
+                        && can_collapse_adjacent_sibling_margin(child_style)
+                    {
+                        if let Some(previous_margin_bottom) = previous_collapsible_margin_bottom {
+                            self.current_y +=
+                                previous_margin_bottom.min(child_style.margin_top).max(0.0);
+                        }
                     }
                 }
+                let child_page_index = self.pages.len().saturating_sub(1);
+                let item_start = self.pages[child_page_index].items.len();
+                self.layout_flow_child(child, float_base_left, float_base_right);
+                let item_end = self
+                    .pages
+                    .get(child_page_index)
+                    .map(|page| page.items.len())
+                    .unwrap_or(item_start);
+                if child_page_index == page_index && item_start < item_end {
+                    paint_stack_ranges.push(PaintStackRange {
+                        item_start,
+                        item_end,
+                        z_index: child_style
+                            .as_ref()
+                            .and_then(positioned_z_index)
+                            .unwrap_or(0),
+                        source_order,
+                    });
+                }
+                previous_collapsible_margin_bottom = child_style
+                    .as_ref()
+                    .filter(|style| {
+                        style.float == FloatSide::None
+                            && can_collapse_adjacent_sibling_margin(style)
+                    })
+                    .map(|style| style.margin_bottom.max(0.0));
             }
-            let child_page_index = self.pages.len().saturating_sub(1);
-            let item_start = self.pages[child_page_index].items.len();
-            self.layout_node(child);
-            let item_end = self
-                .pages
-                .get(child_page_index)
-                .map(|page| page.items.len())
-                .unwrap_or(item_start);
-            if child_page_index == page_index && item_start < item_end {
-                paint_stack_ranges.push(PaintStackRange {
-                    item_start,
-                    item_end,
-                    z_index: child_style
-                        .as_ref()
-                        .and_then(positioned_z_index)
-                        .unwrap_or(0),
-                    source_order,
-                });
-            }
-            previous_collapsible_margin_bottom = child_style
-                .as_ref()
-                .filter(|style| can_collapse_adjacent_sibling_margin(style))
-                .map(|style| style.margin_bottom.max(0.0));
+            self.layout_generated_pseudo(id, style, PseudoElement::After);
         }
-        self.layout_generated_pseudo(id, style, PseudoElement::After);
         if paint_stack_ranges.iter().any(|range| range.z_index != 0) {
             reorder_paint_stack_ranges(&mut self.pages[page_index].items, &paint_stack_ranges);
         }
@@ -3180,9 +3960,19 @@ impl<'a> LayoutContext<'a> {
             let _ = self.containing_blocks.pop();
         }
 
+        if style.display == Display::InlineBlock {
+            for float in &self.floats[float_scope_start..] {
+                if float.page_index == self.pages.len().saturating_sub(1) {
+                    self.current_y = self.current_y.min(float.bottom);
+                }
+            }
+        }
+        self.floats.truncate(float_scope_start);
+        self.float_base_left = previous_float_base_left;
+        self.float_base_right = previous_float_base_right;
         self.inset_left = previous_left;
         self.inset_right = previous_right;
-        self.current_y -= style.padding_bottom;
+        self.current_y -= style.padding_bottom + border_bottom;
 
         let natural_height = (top_y - self.current_y).max(0.0);
         let height_base = self.options.page.height_pt
@@ -3309,49 +4099,77 @@ impl<'a> LayoutContext<'a> {
         if style.margin_top > 0.0 {
             self.current_y -= style.margin_top;
         }
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
-        let top_y = self.current_y;
-
-        let raw_available_width = self.options.page.width_pt
-            - self.options.page.margin_left_pt
-            - self.options.page.margin_right_pt
-            - self.inset_left
-            - self.inset_right;
-        let available_width =
-            if style.width.is_some() || style.min_width.is_some() || style.max_width.is_some() {
-                resolve_box_width(style, raw_available_width)
-            } else {
-                raw_available_width
-            };
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut insert_index = self.pages[page_index].items.len();
+        let mut top_y = self.current_y;
         let text = transform_text(text, style.text_transform);
-        let mut lines = wrap_text_with_style(&text, style, available_width);
+        let base_left = self.inset_left
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Left);
+        let base_right = self.inset_right
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Right);
+        let mut lines =
+            self.wrap_text_with_floats(&text, style, base_left.max(0.0), base_right.max(0.0));
+        let mut available_width = lines
+            .iter()
+            .map(|line| line.available_width)
+            .fold(0.0_f32, f32::max);
         if style.white_space == WhiteSpace::NoWrap
             && style.overflow_hidden
             && style.text_overflow == TextOverflow::Ellipsis
         {
             for line in &mut lines {
-                *line = truncate_text_with_ellipsis(line, style, available_width);
+                line.text = truncate_text_with_ellipsis(&line.text, style, line.available_width);
             }
         }
         let layout_line_height = layout_line_height(style);
-        let text_height = layout_line_height * lines.len() as f32;
+        let mut text_height = layout_line_height * lines.len() as f32;
         let height_base = self.options.page.height_pt
             - self.options.page.margin_top_pt
             - self.options.page.margin_bottom_pt;
-        let resolved_flow_height =
+        let mut resolved_flow_height =
             resolve_box_height(style, available_width, text_height, height_base);
-        let visible_overflow_capped =
+        let mut visible_overflow_capped =
             !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-        let flow_height = resolved_flow_height + style.margin_bottom;
-        self.ensure_space(flow_height.max(layout_line_height));
+        let initial_needed = if style.page_break_inside_avoid {
+            resolved_flow_height + style.margin_bottom
+        } else {
+            layout_line_height
+        };
+        let page_count_before = self.pages.len();
+        self.ensure_space(initial_needed.max(layout_line_height));
+        if self.pages.len() != page_count_before {
+            page_index = self.pages.len().saturating_sub(1);
+            insert_index = self.pages[page_index].items.len();
+            top_y = self.current_y;
+            lines =
+                self.wrap_text_with_floats(&text, style, base_left.max(0.0), base_right.max(0.0));
+            available_width = lines
+                .iter()
+                .map(|line| line.available_width)
+                .fold(0.0_f32, f32::max);
+            if style.white_space == WhiteSpace::NoWrap
+                && style.overflow_hidden
+                && style.text_overflow == TextOverflow::Ellipsis
+            {
+                for line in &mut lines {
+                    line.text =
+                        truncate_text_with_ellipsis(&line.text, style, line.available_width);
+                }
+            }
+            text_height = layout_line_height * lines.len() as f32;
+            resolved_flow_height =
+                resolve_box_height(style, available_width, text_height, height_base);
+            visible_overflow_capped =
+                !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
+        }
 
         if let Some(background) = style.background {
+            let first_line = lines.first().expect("non-empty text should produce a line");
             let y = self.current_y - layout_line_height * lines.len() as f32 + 2.0;
             self.push(LayoutItem::Rect(Rect {
-                x: self.options.page.margin_left_pt + self.inset_left,
+                x: self.options.page.margin_left_pt + first_line.inset_left,
                 y,
-                width: available_width,
+                width: first_line.available_width,
                 height: layout_line_height * lines.len() as f32 + 6.0,
                 color: background.with_opacity(style.opacity),
             }));
@@ -3360,7 +4178,7 @@ impl<'a> LayoutContext<'a> {
         let line_count = lines.len();
         for (line_index, line) in lines.into_iter().enumerate() {
             let width = estimate_text_width_with_spacing(
-                &line,
+                &line.text,
                 style.font_size,
                 style.font_face,
                 style.font_weight,
@@ -3369,34 +4187,34 @@ impl<'a> LayoutContext<'a> {
             );
             let resolved_align = resolved_line_text_align(style, line_index, line_count);
             let x = match resolved_align {
-                TextAlign::Left => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Left => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Center => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - width).max(0.0) / 2.0
+                        + line.inset_left
+                        + (line.available_width - width).max(0.0) / 2.0
                 }
                 TextAlign::Right => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - width).max(0.0)
+                        + line.inset_left
+                        + (line.available_width - width).max(0.0)
                 }
-                TextAlign::Justify => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Justify => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Start | TextAlign::End => {
                     unreachable!("resolved_line_text_align must resolve logical alignments")
                 }
             };
             let word_spacing = justified_word_spacing(
                 resolved_align,
-                &line,
+                &line.text,
                 width,
-                available_width,
+                line.available_width,
                 style.word_spacing,
                 suppress_justify_spacing_for_line(style, line_index, line_count),
             );
             self.push(LayoutItem::Text(TextRun {
                 x,
                 y: self.current_y - style.font_size,
-                text: line,
+                text: line.text,
                 font_size: style.font_size,
                 color: style.color.with_opacity(style.opacity),
                 font_weight: style.font_weight,
@@ -3427,6 +4245,7 @@ impl<'a> LayoutContext<'a> {
             height,
             style,
         );
+        self.apply_relative_position_to_following_pages(page_index, style, available_width, height);
         let final_height = resolve_box_height(style, available_width, height, height_base);
         self.apply_same_page_flow_box_height(page_index, top_y, final_height);
         self.current_y -= style.margin_bottom;
@@ -3436,21 +4255,9 @@ impl<'a> LayoutContext<'a> {
         if style.margin_top > 0.0 {
             self.current_y -= style.margin_top;
         }
-        let page_index = self.pages.len().saturating_sub(1);
-        let insert_index = self.pages[page_index].items.len();
-        let top_y = self.current_y;
-
-        let raw_available_width = self.options.page.width_pt
-            - self.options.page.margin_left_pt
-            - self.options.page.margin_right_pt
-            - self.inset_left
-            - self.inset_right;
-        let available_width =
-            if style.width.is_some() || style.min_width.is_some() || style.max_width.is_some() {
-                resolve_box_width(style, raw_available_width)
-            } else {
-                raw_available_width
-            };
+        let mut page_index = self.pages.len().saturating_sub(1);
+        let mut insert_index = self.pages[page_index].items.len();
+        let mut top_y = self.current_y;
 
         let mut segments = Vec::new();
         self.collect_inline_text_segments(id, style, &mut segments);
@@ -3458,48 +4265,115 @@ impl<'a> LayoutContext<'a> {
             return;
         }
 
-        let lines = wrap_inline_segments(&segments, available_width);
+        let base_left = self.inset_left
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Left);
+        let base_right = self.inset_right
+            - self.float_occupied_width_at_y(page_index, self.current_y, FloatSide::Right);
+        let mut lines = self.wrap_inline_segments_with_floats(
+            &segments,
+            style,
+            base_left.max(0.0),
+            base_right.max(0.0),
+        );
+        let mut available_width = lines
+            .iter()
+            .map(|line| line.available_width)
+            .fold(0.0_f32, f32::max);
         let layout_line_height = layout_line_height(style);
-        let text_height = layout_line_height * lines.len() as f32;
         let height_base = self.options.page.height_pt
             - self.options.page.margin_top_pt
             - self.options.page.margin_bottom_pt;
-        let resolved_flow_height =
+        let mut text_height = lines
+            .iter()
+            .map(|line| inline_line_metrics(&line.segments, style).1)
+            .sum();
+        let mut resolved_flow_height =
             resolve_box_height(style, available_width, text_height, height_base);
-        let visible_overflow_capped =
+        let mut visible_overflow_capped =
             !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
-        let flow_height = resolved_flow_height + style.margin_bottom;
-        self.ensure_space(flow_height.max(layout_line_height));
+        let initial_needed = if style.page_break_inside_avoid {
+            resolved_flow_height + style.margin_bottom
+        } else {
+            layout_line_height
+        };
+        let page_count_before = self.pages.len();
+        self.ensure_space(initial_needed.max(layout_line_height));
+        if self.pages.len() != page_count_before {
+            page_index = self.pages.len().saturating_sub(1);
+            insert_index = self.pages[page_index].items.len();
+            top_y = self.current_y;
+            lines = self.wrap_inline_segments_with_floats(
+                &segments,
+                style,
+                base_left.max(0.0),
+                base_right.max(0.0),
+            );
+            available_width = lines
+                .iter()
+                .map(|line| line.available_width)
+                .fold(0.0_f32, f32::max);
+            text_height = lines
+                .iter()
+                .map(|line| inline_line_metrics(&line.segments, style).1)
+                .sum();
+            resolved_flow_height =
+                resolve_box_height(style, available_width, text_height, height_base);
+            visible_overflow_capped =
+                !style.overflow_hidden && resolved_flow_height + 0.01 < text_height;
+            self.ensure_space(layout_line_height);
+        }
 
         let line_count = lines.len();
         for (line_index, line) in lines.into_iter().enumerate() {
-            let line_width = inline_segments_width(&line);
+            let line_width = inline_segments_width(&line.segments);
+            let (baseline_offset, actual_height) = inline_line_metrics(&line.segments, style);
+            if !visible_overflow_capped {
+                let page_count = self.pages.len();
+                self.ensure_space(actual_height);
+                if line_index == 0 && self.pages.len() != page_count {
+                    page_index = self.pages.len() - 1;
+                    insert_index = self.pages[page_index].items.len();
+                    top_y = self.current_y;
+                }
+            }
             let resolved_align = resolved_line_text_align(style, line_index, line_count);
             let extra_word_spacing = justified_inline_word_spacing(
                 resolved_align,
-                &line,
+                &line.segments,
                 line_width,
-                available_width,
+                line.available_width,
                 suppress_justify_spacing_for_line(style, line_index, line_count),
             );
             let mut x = match resolved_align {
-                TextAlign::Left => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Left => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Center => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - line_width).max(0.0) / 2.0
+                        + line.inset_left
+                        + (line.available_width - line_width).max(0.0) / 2.0
                 }
                 TextAlign::Right => {
                     self.options.page.margin_left_pt
-                        + self.inset_left
-                        + (available_width - line_width).max(0.0)
+                        + line.inset_left
+                        + (line.available_width - line_width).max(0.0)
                 }
-                TextAlign::Justify => self.options.page.margin_left_pt + self.inset_left,
+                TextAlign::Justify => self.options.page.margin_left_pt + line.inset_left,
                 TextAlign::Start | TextAlign::End => {
                     unreachable!("resolved_line_text_align must resolve logical alignments")
                 }
             };
-            for segment in line {
+            for segment in line.segments {
+                if let Some(atomic) = &segment.atomic {
+                    let mut items = atomic.items.clone();
+                    let top_offset = match segment.style.vertical_align {
+                        VerticalAlign::Top => 0.0,
+                        VerticalAlign::Bottom => actual_height - atomic.height,
+                        _ => baseline_offset - atomic.baseline,
+                    };
+                    shift_layout_items(&mut items, x, self.current_y - top_offset);
+                    self.pages.last_mut().unwrap().items.extend(items);
+                    x += atomic.width;
+                    continue;
+                }
                 let segment_width = estimate_text_width_with_spacing(
                     &segment.text,
                     segment.style.font_size,
@@ -3511,7 +4385,7 @@ impl<'a> LayoutContext<'a> {
                 let segment_word_spacing_opportunities = word_spacing_opportunities(&segment.text);
                 self.push(LayoutItem::Text(TextRun {
                     x,
-                    y: self.current_y - style.font_size,
+                    y: self.current_y - baseline_offset,
                     text: segment.text,
                     font_size: segment.style.font_size,
                     color: segment.style.color.with_opacity(segment.style.opacity),
@@ -3519,7 +4393,7 @@ impl<'a> LayoutContext<'a> {
                     font_style: segment.style.font_style,
                     font_face: segment.style.font_face,
                     letter_spacing: segment.style.letter_spacing,
-                    word_spacing: segment.style.word_spacing,
+                    word_spacing: segment.style.word_spacing + extra_word_spacing,
                     text_decoration: segment.style.text_decoration,
                     text_decoration_color: segment.style.text_decoration_color,
                     text_decoration_thickness: segment.style.text_decoration_thickness,
@@ -3529,22 +4403,20 @@ impl<'a> LayoutContext<'a> {
                 }));
                 x += segment_width + extra_word_spacing * segment_word_spacing_opportunities as f32;
             }
-            self.current_y -= layout_line_height;
-            if line_index + 1 < line_count && !visible_overflow_capped {
-                self.ensure_space(layout_line_height);
-            }
+            self.current_y -= actual_height;
         }
 
         let height = (top_y - self.current_y).max(0.0);
         self.apply_style_transform_to_range(
             page_index,
             insert_index,
-            self.options.page.margin_left_pt + self.inset_left,
+            self.options.page.margin_left_pt + base_left.max(0.0),
             self.current_y,
             available_width,
             height,
             style,
         );
+        self.apply_relative_position_to_following_pages(page_index, style, available_width, height);
         let final_height = resolve_box_height(style, available_width, height, height_base);
         self.apply_same_page_flow_box_height(page_index, top_y, final_height);
         self.current_y -= style.margin_bottom;
@@ -3756,16 +4628,20 @@ impl<'a> LayoutContext<'a> {
         if item_start >= page.items.len() {
             return;
         }
-        let translate_x = style
+        let transform_translate_x = style
             .transform_translate_x
             .as_ref()
             .map(|value| value.resolve(width))
             .unwrap_or(0.0);
-        let translate_y_css = style
+        let transform_translate_y_css = style
             .transform_translate_y
             .as_ref()
             .map(|value| value.resolve(height))
             .unwrap_or(0.0);
+        let (relative_translate_x, relative_translate_y_css) =
+            relative_position_offset(style, width, height);
+        let translate_x = transform_translate_x + relative_translate_x;
+        let translate_y_css = transform_translate_y_css + relative_translate_y_css;
         let scale_x = style.transform_scale_x;
         let scale_y = style.transform_scale_y;
         let rotate_deg = style.transform_rotate_deg;
@@ -3794,6 +4670,134 @@ impl<'a> LayoutContext<'a> {
         }
     }
 
+    fn apply_relative_position_to_range(
+        &mut self,
+        page_index: usize,
+        item_start: usize,
+        style: &ComputedStyle,
+        width: f32,
+        height: f32,
+    ) {
+        let (translate_x, translate_y_css) = relative_position_offset(style, width, height);
+        if translate_x.abs() <= 0.001 && translate_y_css.abs() <= 0.001 {
+            return;
+        }
+        let Some(page) = self.pages.get_mut(page_index) else {
+            return;
+        };
+        if item_start < page.items.len() {
+            shift_layout_items(&mut page.items[item_start..], translate_x, -translate_y_css);
+        }
+    }
+
+    fn apply_relative_position_to_following_pages(
+        &mut self,
+        first_page_index: usize,
+        style: &ComputedStyle,
+        width: f32,
+        height: f32,
+    ) {
+        for page_index in (first_page_index + 1)..self.pages.len() {
+            self.apply_relative_position_to_range(page_index, 0, style, width, height);
+        }
+    }
+
+    fn measure_inline_atomic_box(&mut self, id: NodeId, style: &ComputedStyle) -> InlineAtomicBox {
+        let available = (self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt
+            - self.inset_left
+            - self.inset_right)
+            .max(0.0);
+        let mut box_style = style.clone();
+        let mut width = if style.width.is_some() {
+            resolve_flow_horizontal_geometry(style, available).box_width
+        } else {
+            (self.intrinsic_inline_width(id, available) - style.margin_left - style.margin_right)
+                .max(0.0)
+        };
+        if style.width.is_none() {
+            let mut constrained = style.clone();
+            constrained.width = Some(crate::css::CssLength::Linear {
+                percent: 0.0,
+                points: if style.box_sizing == BoxSizing::BorderBox {
+                    width
+                } else {
+                    (width - horizontal_box_extras(style)).max(0.0)
+                },
+            });
+            width = resolve_flow_horizontal_geometry(&constrained, available).box_width;
+        }
+        // Resolve percentages against the containing block before creating the
+        // independent formatting context. Keep the measured border box fixed.
+        box_style.width = Some(crate::css::CssLength::Linear {
+            percent: 0.0,
+            points: if style.box_sizing == BoxSizing::BorderBox {
+                width
+            } else {
+                (width - horizontal_box_extras(style)).max(0.0)
+            },
+        });
+        box_style.min_width = None;
+        box_style.max_width = None;
+        let outer_width = width + style.margin_left + style.margin_right;
+        let top = self.options.page.height_pt - self.options.page.margin_top_pt;
+        let inset_right = self.options.page.width_pt
+            - self.options.page.margin_left_pt
+            - self.options.page.margin_right_pt
+            - outer_width;
+        // Do not clone already rendered document pages for every inline box.
+        let mut probe = LayoutContext {
+            document: self.document,
+            stylesheet: self.stylesheet,
+            options: self.options,
+            pages: vec![LayoutPage {
+                number: 1,
+                page: self.options.page,
+                items: Vec::new(),
+            }],
+            current_y: top,
+            inset_left: 0.0,
+            inset_right,
+            float_base_left: 0.0,
+            float_base_right: inset_right,
+            containing_blocks: Vec::new(),
+            floats: Vec::new(),
+            fixed_overlays: Vec::new(),
+            suppress_positioning: false,
+            suppress_floats: false,
+            suppress_pagination: true,
+            suppress_keep_with_next: true,
+            style_cache: self.style_cache.clone(),
+        };
+        probe.style_cache.insert(id, box_style.clone());
+        probe.layout_container(id, &box_style);
+        let height = (top - probe.current_y).max(0.0);
+        let mut items = std::mem::take(&mut probe.pages[0].items);
+        let baseline = if style.overflow_hidden {
+            height
+        } else {
+            items
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    LayoutItem::Text(run) => Some(top - run.y),
+                    _ => None,
+                })
+                .unwrap_or(height)
+        };
+        shift_layout_items(&mut items, -self.options.page.margin_left_pt, -top);
+        if style.visibility != Visibility::Visible {
+            items.clear();
+        }
+        InlineAtomicBox {
+            items,
+            width: outer_width,
+            height,
+            baseline,
+        }
+    }
+
     fn collect_inline_text_segments(
         &mut self,
         id: NodeId,
@@ -3805,15 +4809,24 @@ impl<'a> LayoutContext<'a> {
         for child in self.document.children(id).iter().copied() {
             match self.document.node(child) {
                 Some(Node::Text(text)) => {
-                    if !text.trim().is_empty() {
+                    if !text.is_empty() {
                         segments.push(InlineTextSegment {
-                            text: transform_text(text, inherited_style.text_transform),
+                            atomic: None,
+                            text: transform_text(
+                                &if inherited_style.white_space == WhiteSpace::PreLine {
+                                    text.clone()
+                                } else {
+                                    text.replace('\n', " ")
+                                },
+                                inherited_style.text_transform,
+                            ),
                             style: inherited_style.clone(),
                         });
                     }
                 }
                 Some(Node::Element(element)) if element.tag == "br" => {
                     segments.push(InlineTextSegment {
+                        atomic: None,
                         text: "\n".to_string(),
                         style: self.computed_style(child),
                     });
@@ -3825,10 +4838,20 @@ impl<'a> LayoutContext<'a> {
                     if child_style.display == Display::None {
                         continue;
                     }
+                    if child_style.display == Display::InlineBlock {
+                        let atomic = self.measure_inline_atomic_box(child, &child_style);
+                        segments.push(InlineTextSegment {
+                            text: String::new(),
+                            style: child_style,
+                            atomic: Some(std::rc::Rc::new(atomic)),
+                        });
+                        continue;
+                    }
                     if self.document.children(child).is_empty() {
                         let text = self.document.text_content(child);
                         if !text.trim().is_empty() {
                             segments.push(InlineTextSegment {
+                                atomic: None,
                                 text: transform_text(&text, child_style.text_transform),
                                 style: child_style,
                             });
@@ -3863,6 +4886,7 @@ impl<'a> LayoutContext<'a> {
             ListStyleType::None => return,
         };
         segments.push(InlineTextSegment {
+            atomic: None,
             text: marker,
             style: style.clone(),
         });
@@ -3885,6 +4909,7 @@ impl<'a> LayoutContext<'a> {
             return;
         }
         segments.push(InlineTextSegment {
+            atomic: None,
             text: transform_text(&content, style.text_transform),
             style,
         });
@@ -3898,26 +4923,14 @@ impl<'a> LayoutContext<'a> {
         if self.pages.last().is_some_and(|page| page.items.is_empty()) {
             return;
         }
-        let number = self.pages.len() + 1;
-        self.pages.push(LayoutPage {
-            number,
-            page: self.options.page,
-            items: Vec::new(),
-        });
-        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.start_new_page();
     }
 
     fn force_page_break(&mut self) {
         if self.pages.last().is_some_and(|page| page.items.is_empty()) {
             return;
         }
-        let number = self.pages.len() + 1;
-        self.pages.push(LayoutPage {
-            number,
-            page: self.options.page,
-            items: Vec::new(),
-        });
-        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.start_new_page();
     }
 
     fn should_start_avoid_block_on_next_page(&self, id: NodeId, style: &ComputedStyle) -> bool {
@@ -4048,6 +5061,51 @@ impl<'a> LayoutContext<'a> {
         }
     }
 
+    fn register_fixed_overlay(&mut self, page_index: usize, item_start: usize) {
+        let Some(page) = self.pages.get(page_index) else {
+            return;
+        };
+        let overlay = page.items.get(item_start..).unwrap_or_default().to_vec();
+        if overlay.is_empty() {
+            return;
+        }
+
+        if let Some(page) = self.pages.get_mut(page_index) {
+            page.items.truncate(item_start);
+        }
+        self.fixed_overlays.push(overlay);
+    }
+
+    fn append_fixed_overlays(&mut self) {
+        if self.fixed_overlays.is_empty() {
+            return;
+        }
+        let overlays = self
+            .fixed_overlays
+            .iter()
+            .flat_map(|overlay| overlay.iter().cloned())
+            .collect::<Vec<_>>();
+        for page in &mut self.pages {
+            page.items.extend(overlays.iter().cloned());
+        }
+    }
+
+    fn start_new_page(&mut self) {
+        if self.suppress_pagination {
+            return;
+        }
+        let number = self.pages.len() + 1;
+        self.pages.push(LayoutPage {
+            number,
+            page: self.options.page,
+            items: Vec::new(),
+        });
+        self.current_y = self.options.page.height_pt - self.options.page.margin_top_pt;
+        self.floats.clear();
+        self.inset_left = self.float_base_left;
+        self.inset_right = self.float_base_right;
+    }
+
     fn insert_continuation_background_fragments(
         &mut self,
         first_page_index: usize,
@@ -4118,10 +5176,10 @@ impl<'a> LayoutContext<'a> {
         height: f32,
         style: &ComputedStyle,
     ) {
-        let top_width = style.border_top_width.max(style.border_width);
-        let right_width = style.border_right_width.max(style.border_width);
-        let bottom_width = style.border_bottom_width.max(style.border_width);
-        let left_width = style.border_left_width.max(style.border_width);
+        let top_width = style.border_top_width;
+        let right_width = style.border_right_width;
+        let bottom_width = style.border_bottom_width;
+        let left_width = style.border_left_width;
         let top_color = style
             .border_top_color
             .or(style.border_color)
@@ -4156,12 +5214,13 @@ impl<'a> LayoutContext<'a> {
             )
         {
             self.push(LayoutItem::StrokeRect(StrokeRect {
-                x,
-                y,
-                width,
-                height,
+                x: x + top_width / 2.0,
+                y: y + top_width / 2.0,
+                width: (width - top_width).max(0.0),
+                height: (height - top_width).max(0.0),
                 stroke_width: top_width,
-                radius: style.border_radius,
+                radius: (style.border_radius.min(width / 2.0).min(height / 2.0) - top_width / 2.0)
+                    .max(0.0),
                 color: top_color,
                 dash: border_dash(style.border_style, top_width),
             }));
@@ -4170,6 +5229,81 @@ impl<'a> LayoutContext<'a> {
 
         let top = y + height;
         let right = x + width;
+        if style.border_style == BorderLineStyle::Solid && style.border_radius == 0.0 {
+            if rounded_border_can_use_single_stroke(
+                top_width,
+                right_width,
+                bottom_width,
+                left_width,
+                top_color,
+                right_color,
+                bottom_color,
+                left_color,
+            ) {
+                self.push(LayoutItem::StrokeRect(StrokeRect {
+                    x: x + top_width / 2.0,
+                    y: y + top_width / 2.0,
+                    width: (width - top_width).max(0.0),
+                    height: (height - top_width).max(0.0),
+                    stroke_width: top_width,
+                    radius: 0.0,
+                    color: top_color,
+                    dash: None,
+                }));
+                return;
+            }
+            let inner_left = x + left_width;
+            let inner_right = right - right_width;
+            let inner_top = top - top_width;
+            let inner_bottom = y + bottom_width;
+            for (side_width, color, points) in [
+                (
+                    top_width,
+                    top_color,
+                    vec![
+                        (x, top),
+                        (right, top),
+                        (inner_right, inner_top),
+                        (inner_left, inner_top),
+                    ],
+                ),
+                (
+                    right_width,
+                    right_color,
+                    vec![
+                        (right, top),
+                        (right, y),
+                        (inner_right, inner_bottom),
+                        (inner_right, inner_top),
+                    ],
+                ),
+                (
+                    bottom_width,
+                    bottom_color,
+                    vec![
+                        (right, y),
+                        (x, y),
+                        (inner_left, inner_bottom),
+                        (inner_right, inner_bottom),
+                    ],
+                ),
+                (
+                    left_width,
+                    left_color,
+                    vec![
+                        (x, y),
+                        (x, top),
+                        (inner_left, inner_top),
+                        (inner_left, inner_bottom),
+                    ],
+                ),
+            ] {
+                if side_width > 0.0 {
+                    self.push(LayoutItem::Polygon(Polygon { points, color }));
+                }
+            }
+            return;
+        }
         if top_width > 0.0 {
             self.push(LayoutItem::Line(Line {
                 x1: x,
@@ -4264,8 +5398,7 @@ impl<'a> LayoutContext<'a> {
 }
 
 fn has_border(style: &ComputedStyle) -> bool {
-    style.border_width > 0.0
-        || style.border_top_width > 0.0
+    style.border_top_width > 0.0
         || style.border_right_width > 0.0
         || style.border_bottom_width > 0.0
         || style.border_left_width > 0.0
@@ -4417,6 +5550,35 @@ fn is_out_of_flow_position(style: &ComputedStyle) -> bool {
     matches!(style.position, Position::Absolute | Position::Fixed)
 }
 
+fn relative_position_offset(style: &ComputedStyle, width: f32, height: f32) -> (f32, f32) {
+    if style.position != Position::Relative {
+        return (0.0, 0.0);
+    }
+    let translate_x = style
+        .inset_left
+        .as_ref()
+        .map(|value| value.resolve(width))
+        .or_else(|| {
+            style
+                .inset_right
+                .as_ref()
+                .map(|value| -value.resolve(width))
+        })
+        .unwrap_or(0.0);
+    let translate_y_css = style
+        .inset_top
+        .as_ref()
+        .map(|value| value.resolve(height))
+        .or_else(|| {
+            style
+                .inset_bottom
+                .as_ref()
+                .map(|value| -value.resolve(height))
+        })
+        .unwrap_or(0.0);
+    (translate_x, translate_y_css)
+}
+
 fn is_positioned_containing_block(style: &ComputedStyle) -> bool {
     !matches!(style.position, Position::Static)
 }
@@ -4460,25 +5622,7 @@ fn positioned_height(style: &ComputedStyle, containing_height: f32) -> f32 {
 }
 
 fn resolve_box_width(style: &ComputedStyle, available_width: f32) -> f32 {
-    let mut width = style
-        .width
-        .as_ref()
-        .map(|width| {
-            let specified = width.resolve(available_width);
-            if style.box_sizing == BoxSizing::ContentBox {
-                specified + horizontal_box_extras(style)
-            } else {
-                specified
-            }
-        })
-        .unwrap_or(available_width);
-    if let Some(min_width) = &style.min_width {
-        width = width.max(min_width.resolve(available_width));
-    }
-    if let Some(max_width) = &style.max_width {
-        width = width.min(max_width.resolve(available_width));
-    }
-    width.clamp(0.0, available_width)
+    resolve_flow_box_width(style, available_width, available_width)
 }
 
 fn resolved_text_align(style: &ComputedStyle) -> TextAlign {
@@ -4613,10 +5757,6 @@ fn resolve_flow_box_width(
     containing_width: f32,
     available_width: f32,
 ) -> f32 {
-    if style.width.is_none() {
-        return resolve_box_width(style, available_width);
-    }
-
     let mut width = style
         .width
         .as_ref()
@@ -4629,13 +5769,18 @@ fn resolve_flow_box_width(
             }
         })
         .unwrap_or(available_width);
-    if let Some(min_width) = &style.min_width {
-        width = width.max(min_width.resolve(containing_width));
-    }
+    let extras = if style.box_sizing == BoxSizing::ContentBox {
+        horizontal_box_extras(style)
+    } else {
+        0.0
+    };
     if let Some(max_width) = &style.max_width {
-        width = width.min(max_width.resolve(containing_width));
+        width = width.min(max_width.resolve(containing_width) + extras);
     }
-    width.max(0.0)
+    if let Some(min_width) = &style.min_width {
+        width = width.max(min_width.resolve(containing_width) + extras);
+    }
+    width.max(horizontal_box_extras(style)).max(0.0)
 }
 
 fn resolve_box_height(
@@ -4644,29 +5789,40 @@ fn resolve_box_height(
     natural_height: f32,
     height_base: f32,
 ) -> f32 {
+    let vertical_extras = style.padding_top
+        + style.padding_bottom
+        + style.border_top_width
+        + style.border_bottom_width;
+    let extras = if style.box_sizing == BoxSizing::ContentBox {
+        vertical_extras
+    } else {
+        0.0
+    };
     let min_height = style
         .min_height
         .as_ref()
-        .map(|height| height.resolve(height_base))
+        .map(|height| height.resolve(height_base) + extras)
         .unwrap_or(0.0);
     let mut resolved = if let Some(height) = &style.height {
-        height.resolve(height_base).max(min_height)
+        (height.resolve(height_base) + extras).max(min_height)
     } else if let Some(ratio) = style.aspect_ratio {
-        natural_height.max(box_width / ratio).max(min_height)
+        let ratio_height = if style.box_sizing == BoxSizing::ContentBox {
+            (box_width - horizontal_box_extras(style)).max(0.0) / ratio + vertical_extras
+        } else {
+            box_width / ratio
+        };
+        natural_height.max(ratio_height).max(min_height)
     } else {
         natural_height.max(min_height)
     };
     if let Some(max_height) = &style.max_height {
-        resolved = resolved.min(max_height.resolve(height_base).max(min_height));
+        resolved = resolved.min((max_height.resolve(height_base) + extras).max(min_height));
     }
-    resolved
+    resolved.max(vertical_extras).max(0.0)
 }
 
 fn horizontal_box_extras(style: &ComputedStyle) -> f32 {
-    style.padding_left
-        + style.padding_right
-        + style.border_left_width.max(style.border_width)
-        + style.border_right_width.max(style.border_width)
+    style.padding_left + style.padding_right + style.border_left_width + style.border_right_width
 }
 
 #[derive(Debug)]
@@ -4682,6 +5838,9 @@ fn load_image_asset(src: &str, options: &RenderOptions) -> Option<LoadedImage> {
     let data = if src.trim_start().starts_with("data:") {
         decode_data_uri_image(src)?
     } else {
+        if !options.allow_local_assets {
+            return None;
+        }
         std::fs::read(resolve_local_image_asset(options.base_url.as_deref(), src)?).ok()?
     };
     if let Some((width, height)) = jpeg_dimensions(&data) {
@@ -6251,10 +7410,10 @@ fn background_clip_rect(
 
 fn border_insets(style: &ComputedStyle) -> (f32, f32, f32, f32) {
     (
-        style.border_left_width.max(style.border_width),
-        style.border_right_width.max(style.border_width),
-        style.border_top_width.max(style.border_width),
-        style.border_bottom_width.max(style.border_width),
+        style.border_left_width,
+        style.border_right_width,
+        style.border_top_width,
+        style.border_bottom_width,
     )
 }
 
@@ -6798,6 +7957,105 @@ fn form_control_box_size(
     (width.max(0.0), height.max(0.0))
 }
 
+#[cfg(test)]
+fn wrap_textarea_lines(
+    text: &str,
+    style: &ComputedStyle,
+    width: f32,
+    no_wrap: bool,
+) -> Vec<String> {
+    wrap_textarea_lines_bounded(text, style, width, no_wrap, usize::MAX)
+}
+
+fn textarea_tab_advance(style: &ComputedStyle, advance: f32) -> f32 {
+    let space = estimate_text_width_with_spacing(
+        " ",
+        style.font_size,
+        style.font_face,
+        style.font_weight,
+        0.0,
+        style.word_spacing,
+    ) + style.letter_spacing;
+    let interval = match style.tab_size {
+        crate::css::TabSize::Spaces(count) => count * space,
+        crate::css::TabSize::Points(points) => points,
+    };
+    if !interval.is_finite() || interval <= 0.0 {
+        return 0.0;
+    }
+    ((advance / interval).floor() + 1.0) * interval - advance
+}
+
+fn wrap_textarea_lines_bounded(
+    text: &str,
+    style: &ComputedStyle,
+    width: f32,
+    no_wrap: bool,
+    max_lines: usize,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if max_lines == 0 {
+        return lines;
+    }
+    for hard_line in text.split('\n') {
+        if no_wrap || hard_line.is_empty() {
+            lines.push(hard_line.to_string());
+            if lines.len() >= max_lines {
+                return lines;
+            }
+            continue;
+        }
+        let mut start = 0;
+        let mut cursor = 0;
+        let mut last_break = None;
+        let mut advance = 0.0;
+        while cursor < hard_line.len() {
+            let ch = hard_line[cursor..].chars().next().unwrap();
+            let mut buffer = [0; 4];
+            let glyph_width = if ch == '\t' {
+                textarea_tab_advance(style, advance)
+            } else {
+                estimate_text_width_with_spacing(
+                    ch.encode_utf8(&mut buffer),
+                    style.font_size,
+                    style.font_face,
+                    style.font_weight,
+                    0.0,
+                    style.word_spacing,
+                ) + if cursor > start && hard_line.as_bytes()[cursor - 1] != b'\t' {
+                    style.letter_spacing
+                } else {
+                    0.0
+                }
+            };
+            // Preserved trailing spaces can hang past the wrapping edge. A
+            // following word starts on the next line without losing them.
+            if !matches!(ch, ' ' | '\t') && cursor > start && advance + glyph_width > width {
+                let end = last_break.unwrap_or(cursor);
+                lines.push(hard_line[start..end].to_string());
+                if lines.len() >= max_lines {
+                    return lines;
+                }
+                start = end;
+                cursor = end;
+                last_break = None;
+                advance = 0.0;
+                continue;
+            }
+            advance += glyph_width;
+            cursor += ch.len_utf8();
+            if matches!(ch, ' ' | '\t') {
+                last_break = Some(cursor);
+            }
+        }
+        lines.push(hard_line[start..].to_string());
+        if lines.len() >= max_lines {
+            return lines;
+        }
+    }
+    lines
+}
+
 fn form_control_text(document: &Document, id: NodeId, element: &ElementNode) -> Option<String> {
     let kind = form_control_type(element);
     match kind.as_deref() {
@@ -6811,11 +8069,19 @@ fn form_control_text(document: &Document, id: NodeId, element: &ElementNode) -> 
             (!value.trim().is_empty()).then_some(value)
         }
         Some("textarea") => {
-            let value = element
-                .attr("value")
-                .map(str::to_string)
-                .unwrap_or_else(|| document.text_content(id).trim().to_string());
-            (!value.trim().is_empty()).then_some(value)
+            let value: String = document
+                .children(id)
+                .iter()
+                .filter_map(|child| match document.node(*child) {
+                    Some(Node::Text(text)) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            if value.is_empty() {
+                element.attr("placeholder").map(str::to_string)
+            } else {
+                Some(value)
+            }
         }
         Some("password") => element
             .attr("value")
@@ -6971,6 +8237,55 @@ fn table_row_height(prepared: &[PreparedCell], border_collapse: BorderCollapse) 
     }
 }
 
+fn table_row_fragment_height(
+    prepared: &[PreparedCell],
+    line_start: usize,
+    line_end: usize,
+    first_fragment: bool,
+    last_fragment: bool,
+    border_collapse: BorderCollapse,
+) -> f32 {
+    let height = prepared
+        .iter()
+        .map(|cell| {
+            let start = line_start.min(cell.lines.len());
+            let end = line_end.min(cell.lines.len()).max(start);
+            let content_height = cell.lines[start..end]
+                .iter()
+                .map(|line| line.before + line.style.line_height + line.after)
+                .sum::<f32>();
+            let includes_top_padding = first_fragment && start == 0;
+            let includes_bottom_padding =
+                last_fragment || (start < cell.lines.len() && end >= cell.lines.len());
+            let top_padding = if includes_top_padding {
+                cell.style.padding_top
+            } else {
+                0.0
+            };
+            let bottom_padding = if includes_bottom_padding {
+                cell.style.padding_bottom
+            } else {
+                0.0
+            };
+            let nested_adjustment = if start < cell.lines.len() && end >= cell.lines.len() {
+                (cell.height
+                    - cell.style.padding_top
+                    - cell.style.padding_bottom
+                    - cell.content_height)
+                    .max(0.0)
+            } else {
+                0.0
+            };
+            top_padding + bottom_padding + content_height + nested_adjustment
+        })
+        .fold(0.0_f32, f32::max);
+    if border_collapse == BorderCollapse::Collapse {
+        (height - collapsed_border_overlap(prepared)).max(1.0)
+    } else {
+        height.max(1.0)
+    }
+}
+
 fn table_horizontal_spacing(style: &ComputedStyle, column_count: usize) -> f32 {
     if column_count > 1 && style.border_collapse == BorderCollapse::Separate {
         style.border_spacing_horizontal.max(0.0)
@@ -7051,10 +8366,15 @@ fn ordered_list_item_index(document: &Document, id: NodeId) -> usize {
 fn is_text_aggregation_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "a" | "button"
+        "a" | "abbr"
+            | "b"
+            | "button"
             | "caption"
+            | "cite"
+            | "code"
             | "dd"
             | "dt"
+            | "em"
             | "figcaption"
             | "h1"
             | "h2"
@@ -7062,15 +8382,20 @@ fn is_text_aggregation_tag(tag: &str) -> bool {
             | "h4"
             | "h5"
             | "h6"
+            | "i"
             | "label"
             | "legend"
             | "li"
+            | "mark"
             | "p"
             | "small"
             | "span"
             | "strong"
+            | "sub"
+            | "sup"
             | "td"
             | "th"
+            | "u"
     )
 }
 
@@ -7079,74 +8404,179 @@ fn has_styled_inline_children(document: &Document, id: NodeId) -> bool {
         matches!(
             document.node(*child),
             Some(Node::Element(element))
-                if matches!(element.tag.as_str(), "strong" | "b" | "em" | "span")
+                if is_text_aggregation_tag(&element.tag)
                     && !document.text_content(*child).trim().is_empty()
         )
     })
 }
 
-fn wrap_inline_segments(
-    segments: &[InlineTextSegment],
-    available_width: f32,
-) -> Vec<Vec<InlineTextSegment>> {
-    let mut lines = Vec::new();
-    let mut current = Vec::new();
-    let mut current_width = 0.0_f32;
+fn is_css_collapsible_space(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{000c}')
+}
+
+fn css_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(is_css_collapsible_space)
+        .filter(|part| !part.is_empty())
+}
+
+fn tokenize_inline_segments(segments: &[InlineTextSegment]) -> Vec<InlineTextSegment> {
+    let mut tokens = Vec::new();
+    let mut pending_space = false;
 
     for segment in segments {
-        if segment.text == "\n" {
-            if !current.is_empty() {
-                lines.push(current);
-                current = Vec::new();
-                current_width = 0.0;
+        if segment.atomic.is_some() {
+            if pending_space && !tokens.is_empty() {
+                tokens.push(InlineTextSegment {
+                    text: " ".into(),
+                    style: segment.style.clone(),
+                    atomic: None,
+                });
             }
+            tokens.push(segment.clone());
+            pending_space = false;
+            continue;
+        }
+        if segment.text == "\n" {
+            tokens.push(segment.clone());
+            pending_space = false;
             continue;
         }
 
-        for word in segment.text.split_whitespace() {
-            let word_segment = InlineTextSegment {
-                text: word.to_string(),
-                style: segment.style.clone(),
-            };
-            let word_width =
-                inline_segments_wrap_width(std::slice::from_ref(&word_segment), available_width);
-            let space_segment = InlineTextSegment {
-                text: " ".to_string(),
-                style: segment.style.clone(),
-            };
-            let space_width =
-                inline_segments_wrap_width(std::slice::from_ref(&space_segment), available_width);
-            let needed = if current.is_empty() {
-                word_width
+        let mut word = String::new();
+        for character in segment.text.chars() {
+            if character == '\n' && segment.style.white_space == WhiteSpace::PreLine {
+                push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
+                tokens.push(InlineTextSegment {
+                    atomic: None,
+                    text: "\n".to_string(),
+                    style: segment.style.clone(),
+                });
+                pending_space = false;
+            } else if is_css_collapsible_space(character) {
+                push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
+                pending_space = true;
             } else {
-                space_width + word_width
-            };
-
-            if !current.is_empty() && current_width + needed > available_width {
-                lines.push(current);
-                current = Vec::new();
-                current_width = 0.0;
+                if pending_space && !tokens.is_empty() {
+                    if !tokens
+                        .last()
+                        .is_some_and(|token: &InlineTextSegment| token.text == "\n")
+                    {
+                        tokens.push(InlineTextSegment {
+                            atomic: None,
+                            text: " ".to_string(),
+                            style: segment.style.clone(),
+                        });
+                    }
+                    pending_space = false;
+                }
+                word.push(character);
             }
-
-            if !current.is_empty() {
-                current.push(space_segment);
-                current_width += space_width;
-            }
-            current.push(word_segment);
-            current_width += word_width;
         }
+        push_inline_word(&mut tokens, &mut word, &segment.style, &mut pending_space);
     }
 
-    if !current.is_empty() {
-        lines.push(current);
+    tokens
+}
+
+fn push_inline_word(
+    tokens: &mut Vec<InlineTextSegment>,
+    word: &mut String,
+    style: &ComputedStyle,
+    pending_space: &mut bool,
+) {
+    if word.is_empty() {
+        return;
     }
-    lines
+    if *pending_space
+        && !tokens.is_empty()
+        && !tokens
+            .last()
+            .is_some_and(|token: &InlineTextSegment| token.text == "\n")
+    {
+        tokens.push(InlineTextSegment {
+            atomic: None,
+            text: " ".to_string(),
+            style: style.clone(),
+        });
+    }
+    tokens.push(InlineTextSegment {
+        atomic: None,
+        text: std::mem::take(word),
+        style: style.clone(),
+    });
+    *pending_space = false;
+}
+
+fn wrap_one_inline_line(
+    tokens: &[InlineTextSegment],
+    start: usize,
+    available_width: f32,
+    no_wrap: bool,
+) -> (Vec<InlineTextSegment>, usize) {
+    let mut line = Vec::new();
+    let mut current_width = 0.0_f32;
+    let mut pending_space = None;
+    let mut cursor = start;
+
+    while cursor < tokens.len() {
+        let token = &tokens[cursor];
+        if token.text == "\n" {
+            return (line, cursor + 1);
+        }
+        if token.text == " " {
+            if !line.is_empty() {
+                pending_space = Some(token.clone());
+            }
+            cursor += 1;
+            continue;
+        }
+
+        // Styling boundaries are not soft wrap opportunities. Measure the
+        // complete word, which may span several differently styled runs,
+        // before deciding whether to move it to the next line.
+        let mut word_end = cursor + 1;
+        while token.atomic.is_none()
+            && word_end < tokens.len()
+            && tokens[word_end].atomic.is_none()
+            && tokens[word_end].text != " "
+            && tokens[word_end].text != "\n"
+        {
+            word_end += 1;
+        }
+        let token_width = inline_segments_wrap_width(&tokens[cursor..word_end], available_width);
+        let space_width = pending_space
+            .as_ref()
+            .map(|space| inline_segments_wrap_width(std::slice::from_ref(space), available_width))
+            .unwrap_or(0.0);
+        let needed_width = if line.is_empty() {
+            token_width
+        } else {
+            space_width + token_width
+        };
+
+        if !no_wrap && !line.is_empty() && current_width + needed_width > available_width {
+            return (line, cursor);
+        }
+
+        if let Some(space) = pending_space.take() {
+            line.push(space);
+            current_width += space_width;
+        }
+        line.extend_from_slice(&tokens[cursor..word_end]);
+        current_width += token_width;
+        cursor = word_end;
+    }
+
+    (line, cursor)
 }
 
 fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f32) -> f32 {
     segments
         .iter()
         .map(|segment| {
+            if let Some(atomic) = &segment.atomic {
+                return atomic.width;
+            }
             estimate_wrap_text_width_with_spacing(
                 &segment.text,
                 segment.style.font_size,
@@ -7160,10 +8590,42 @@ fn inline_segments_wrap_width(segments: &[InlineTextSegment], available_width: f
         .sum()
 }
 
+fn inline_line_metrics(segments: &[InlineTextSegment], style: &ComputedStyle) -> (f32, f32) {
+    let mut ascent = style.font_size;
+    let mut descent = (layout_line_height(style) - ascent).max(0.0);
+    let mut top_height = 0.0_f32;
+    let mut bottom_height = 0.0_f32;
+    for segment in segments {
+        if let Some(atomic) = &segment.atomic {
+            match segment.style.vertical_align {
+                VerticalAlign::Top => {
+                    top_height = top_height.max(atomic.height);
+                    continue;
+                }
+                VerticalAlign::Bottom => {
+                    bottom_height = bottom_height.max(atomic.height);
+                    continue;
+                }
+                _ => {}
+            }
+            ascent = ascent.max(atomic.baseline);
+            descent = descent.max(atomic.height - atomic.baseline);
+        }
+    }
+    // Top/bottom-aligned boxes constrain the total line height, not the
+    // baseline. Expand only the side needed to contain each aligned box.
+    ascent = ascent.max(bottom_height - descent);
+    descent = descent.max(top_height - ascent);
+    (ascent, ascent + descent)
+}
+
 fn inline_segments_width(segments: &[InlineTextSegment]) -> f32 {
     segments
         .iter()
         .map(|segment| {
+            if let Some(atomic) = &segment.atomic {
+                return atomic.width;
+            }
             estimate_text_width_with_spacing(
                 &segment.text,
                 segment.style.font_size,
@@ -7927,10 +9389,39 @@ fn wrap_text_with_style(text: &str, style: &ComputedStyle, available_width: f32)
     }
 }
 
+fn normalize_text_for_flow(text: &str, white_space: WhiteSpace) -> String {
+    match white_space {
+        WhiteSpace::PreLine => collapse_pre_line_whitespace_for_layout(text),
+        WhiteSpace::Normal | WhiteSpace::NoWrap => collapse_normal_whitespace_for_layout(text),
+    }
+}
+
+fn advance_wrapped_text(text: &str, line: &str) -> String {
+    let mut remaining = if let Some(rest) = text.strip_prefix(line) {
+        rest.to_string()
+    } else {
+        let skip_chars = line.chars().count().max(1);
+        let byte_index = text
+            .char_indices()
+            .nth(skip_chars)
+            .map(|(index, _)| index)
+            .unwrap_or(text.len());
+        text[byte_index..].to_string()
+    };
+    if remaining.starts_with('\n') {
+        remaining.remove(0);
+    } else {
+        while matches!(remaining.chars().next(), Some(' ' | '\t' | '\r')) {
+            remaining.remove(0);
+        }
+    }
+    remaining
+}
+
 fn collapse_normal_whitespace_for_layout(text: &str) -> String {
     let collapsed_parts = text
         .split('\n')
-        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|part| css_words(part).collect::<Vec<_>>().join(" "))
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>();
     if collapsed_parts.len() > 1 {
@@ -7942,7 +9433,7 @@ fn collapse_normal_whitespace_for_layout(text: &str) -> String {
 
 fn collapse_pre_line_whitespace_for_layout(text: &str) -> String {
     text.split('\n')
-        .map(|part| part.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|part| css_words(part).collect::<Vec<_>>().join(" "))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -8026,7 +9517,7 @@ fn wrap_text_with_face(
 
     for paragraph in text.split('\n') {
         let mut current = String::new();
-        for word in paragraph.split_whitespace() {
+        for word in css_words(paragraph) {
             let candidate = if current.is_empty() {
                 word.to_string()
             } else {
@@ -8488,6 +9979,42 @@ pub(crate) fn standard_pdf_glyph_width(
     }
 }
 
+pub(crate) fn is_winansi_char(ch: char) -> bool {
+    (ch.is_ascii() && !ch.is_control())
+        || ('\u{00a0}'..='\u{00ff}').contains(&ch)
+        || matches!(
+            ch,
+            '€' | '‚'
+                | 'ƒ'
+                | '„'
+                | '…'
+                | '†'
+                | '‡'
+                | 'ˆ'
+                | '‰'
+                | 'Š'
+                | '‹'
+                | 'Œ'
+                | 'Ž'
+                | '‘'
+                | '’'
+                | '“'
+                | '”'
+                | '•'
+                | '●'
+                | '−'
+                | '–'
+                | '—'
+                | '˜'
+                | '™'
+                | 'š'
+                | '›'
+                | 'œ'
+                | 'ž'
+                | 'Ÿ'
+        )
+}
+
 pub(crate) fn is_boldish(font_weight: FontWeight) -> bool {
     matches!(font_weight, FontWeight::Bold | FontWeight::Heavy)
 }
@@ -8498,7 +10025,7 @@ fn using_real_font_metrics() -> bool {
 }
 
 fn true_type_glyph_width(ch: char, font_face: FontFace, font_weight: FontWeight) -> Option<f32> {
-    if !using_real_font_metrics() {
+    if !using_real_font_metrics() && is_winansi_char(ch) {
         return None;
     }
     let index = font_metric_index(font_face, font_weight);
@@ -9712,6 +11239,1444 @@ mod tests {
     use super::*;
 
     #[test]
+    fn image_translation_moves_image_and_clip_on_the_destination_page() {
+        let html = "<body style='margin:0'><div style='height:50pt'>before</div><img src='assets/generic-alpha.png' style='width:60pt;height:40pt;object-fit:cover;transform:translateX(20pt)'><div>after</div></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.base_url = Some(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        let image = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Image(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(image.x, 25.0);
+        let clip = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::BeginClip(clip) => Some(clip),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(clip.x, 25.0);
+        for page in &pages {
+            for item in &page.items {
+                if let LayoutItem::Text(run) = item {
+                    assert_eq!(
+                        run.x, 5.0,
+                        "image translation must not affect surrounding text"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rounded_border_stroke_uses_inset_geometry_and_normalized_radius() {
+        for (radius, expected_radius) in [(12.0, 8.0), (100.0, 21.0)] {
+            let document = crate::parser::parse_document(&format!("<body style='margin:0'><div style='box-sizing:border-box;width:100pt;height:50pt;border:8pt solid red;border-radius:{radius}pt'></div></body>")).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let options = RenderOptions::default();
+            let pages = layout_document(&document, &stylesheet, &options);
+            let stroke = pages[0]
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    LayoutItem::StrokeRect(rect) => Some(rect),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(stroke.x, options.page.margin_left_pt + 4.0);
+            assert_eq!(
+                stroke.y,
+                options.page.height_pt - options.page.margin_top_pt - 46.0
+            );
+            assert_eq!(
+                (stroke.width, stroke.height, stroke.stroke_width),
+                (92.0, 42.0, 8.0)
+            );
+            assert_eq!(stroke.radius, expected_radius);
+        }
+    }
+
+    #[test]
+    fn solid_border_strokes_stay_inside_the_border_box() {
+        let document = crate::parser::parse_document("<body style='margin:0'><div style='box-sizing:border-box;width:100pt;height:50pt;border:8pt solid red'></div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let stroke = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::StrokeRect(rect) => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(stroke.x, options.page.margin_left_pt + 4.0);
+        assert_eq!(
+            stroke.y,
+            options.page.height_pt - options.page.margin_top_pt - 46.0
+        );
+        assert_eq!(
+            (stroke.width, stroke.height, stroke.stroke_width),
+            (92.0, 42.0, 8.0)
+        );
+    }
+
+    #[test]
+    fn side_width_overrides_do_not_restore_the_border_shorthand_width() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:4pt solid black;border-left-width:0;border-right-width:1pt;border-top-width:0;border-bottom-width:2pt'>inside</div><div>after</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let inside = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "inside" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(inside.x, options.page.margin_left_pt + 3.0);
+        assert_eq!(
+            inside.y,
+            options.page.height_pt - options.page.margin_top_pt - 13.0
+        );
+        let borders: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Polygon(polygon) => {
+                    let min_x = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.0)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_x = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.0)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let min_y = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.1)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_y = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.1)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    Some((max_x - min_x).min(max_y - min_y))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(borders.len(), 2);
+        assert!(borders.contains(&1.0));
+        assert!(borders.contains(&2.0));
+        let after = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            after.y,
+            options.page.height_pt - options.page.margin_top_pt - 30.0
+        );
+    }
+
+    #[test]
+    fn container_border_insets_content_and_contributes_to_auto_height() {
+        for content in ["inside", "<span>inside</span>", "<div>inside</div>"] {
+            let html = format!("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:2pt solid black'>{content}</div><div>after</div></body>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let options = RenderOptions::default();
+            let pages = layout_document(&document, &stylesheet, &options);
+            let runs: Vec<_> = pages[0]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(run) => Some(run),
+                    _ => None,
+                })
+                .collect();
+            let inside = runs.iter().find(|run| run.text == "inside").unwrap();
+            let after = runs.iter().find(|run| run.text == "after").unwrap();
+            let top = options.page.height_pt - options.page.margin_top_pt;
+            assert_eq!(inside.x, options.page.margin_left_pt + 5.0);
+            assert_eq!(inside.y, top - 5.0 - 10.0);
+            assert_eq!(after.y, top - 22.0 - 10.0);
+        }
+    }
+
+    #[test]
+    fn container_border_and_equivalent_padding_produce_equal_text_geometry() {
+        for sizing in ["content-box", "border-box"] {
+            let mut geometries = Vec::new();
+            for edges in ["border:2pt solid black;padding:3pt", "padding:5pt"] {
+                let html = format!("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='box-sizing:{sizing};width:80pt;{edges}'><div style='width:100%;text-align:right'>right</div><span>words that wrap across several lines inside this box</span></div><div>after</div></body>");
+                let document = crate::parser::parse_document(&html).unwrap();
+                let stylesheet = Stylesheet::from_document(&document);
+                let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+                geometries.push(
+                    pages
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(page, contents)| {
+                            contents.items.iter().filter_map(move |item| match item {
+                                LayoutItem::Text(run) => {
+                                    Some((page, run.text.clone(), run.x, run.y))
+                                }
+                                _ => None,
+                            })
+                        })
+                        .collect::<Vec<_>>(),
+                );
+            }
+            assert!(!geometries[0].is_empty());
+            assert_eq!(geometries[0], geometries[1], "{sizing}");
+        }
+    }
+
+    #[test]
+    fn container_reserves_border_before_starting_its_first_line() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='height:49pt'>before</div><div style='border:2pt solid black;padding:3pt'>inside</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        let inside = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "inside" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(inside.x, 10.0);
+        assert_eq!(inside.y, 60.0);
+    }
+
+    #[test]
+    fn form_control_transform_targets_its_destination_page() {
+        for control in [
+            "<input value='inside' style='width:60pt;height:40pt;transform:translateX(20pt);background:#0000ff'>",
+            "<textarea style='width:60pt;height:40pt;transform:translateX(20pt);background:#0000ff'>inside</textarea>",
+        ] {
+            let html = format!("<body style='margin:0'><div style='height:50pt'>before</div>{control}<div>after</div></body>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let mut options = RenderOptions::default();
+            options.page = PageOptions { width_pt:150.0, height_pt:80.0,
+                margin_top_pt:5.0, margin_bottom_pt:5.0, margin_left_pt:5.0, margin_right_pt:5.0 };
+            let pages = layout_document(&document, &stylesheet, &options);
+            assert_eq!(pages.len(), 2);
+            let before = pages[0].items.iter().find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "before" => Some(run), _ => None,
+            }).unwrap();
+            assert_eq!(before.x, 5.0);
+            let background = pages[1].items.iter().find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect), _ => None,
+            }).unwrap();
+            assert_eq!(background.x, 25.0, "control must be translated on its new page");
+            for item in &pages[1].items {
+                match item {
+                    LayoutItem::Text(run) if run.text == "inside" => assert_eq!(run.x, 29.0),
+                    LayoutItem::Text(run) if run.text == "after" => assert_eq!(run.x, 5.0),
+                    LayoutItem::BeginClip(clip) => assert_eq!(clip.x, 29.0),
+                    _ => {},
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn textarea_tabs_advance_to_stops_and_reset_on_each_line() {
+        let document = crate::parser::parse_document("<body style='tab-size:30pt'><textarea wrap='off' style='width:180pt;height:80pt;font-size:10pt;line-height:12pt'>a\tb\tc\nd\te</textarea></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b", "c", "d", "e"]
+        );
+        assert!((runs[1].x - runs[0].x - 30.0).abs() < 0.01);
+        assert!((runs[2].x - runs[0].x - 60.0).abs() < 0.01);
+        assert!((runs[4].x - runs[1].x).abs() < 0.01);
+        assert!((runs[0].y - runs[3].y - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn textarea_tabs_affect_soft_wrapping_without_losing_source_text() {
+        let mut style = ComputedStyle::default();
+        style.tab_size = crate::css::TabSize::Points(50.0);
+        assert_eq!(
+            wrap_textarea_lines("a\tb", &style, 40.0, false),
+            vec!["a\t", "b"]
+        );
+        style.tab_size = crate::css::TabSize::Spaces(0.0);
+        assert_eq!(
+            wrap_textarea_lines("a\tb", &style, 40.0, false),
+            vec!["a\tb"]
+        );
+        assert_eq!(textarea_tab_advance(&style, 5.0), 0.0);
+    }
+
+    #[test]
+    fn tab_size_numbers_lengths_inherit_and_invalid_values_are_ignored() {
+        for (value, expected) in [
+            ("4", crate::css::TabSize::Spaces(4.0)),
+            ("12pt", crate::css::TabSize::Points(12.0)),
+        ] {
+            let document = crate::parser::parse_document(&format!("<body style='tab-size:{value}'><textarea style='tab-size:-1;tab-size:20%;tab-size:NaN'>x</textarea></body>")).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let id = document.query_selector("textarea").unwrap();
+            let style = ComputedStyle::for_node(&document, &stylesheet, id);
+            assert_eq!(style.tab_size, expected);
+        }
+    }
+
+    #[test]
+    fn bounded_textarea_wrapping_keeps_the_same_visible_prefix() {
+        let style = ComputedStyle::default();
+        for text in [
+            "",
+            "\n\n",
+            "alpha  beta\n\n  gamma",
+            "Ωmega longwordwithoutspaces",
+        ] {
+            for width in [1.0, 40.0, 200.0] {
+                for no_wrap in [false, true] {
+                    let full = wrap_textarea_lines(text, &style, width, no_wrap);
+                    for limit in 0..=full.len() + 1 {
+                        assert_eq!(
+                            wrap_textarea_lines_bounded(text, &style, width, no_wrap, limit),
+                            full.iter().take(limit).cloned().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn long_textarea_builds_only_the_requested_lines() {
+        let style = ComputedStyle::default();
+        let text = "a line of text with several words\n".repeat(100_000);
+        let lines = wrap_textarea_lines_bounded(&text, &style, 40.0, false, 3);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.iter().map(String::len).sum::<usize>() < 100);
+        assert_eq!(
+            wrap_textarea_lines_bounded(&text, &style, 40.0, true, 2).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn textarea_value_comes_from_untrimmed_child_text_not_value_attribute() {
+        let document = crate::parser::parse_document(
+            "<textarea value='wrong' placeholder='hint'>  first\n second  </textarea>",
+        )
+        .unwrap();
+        let id = document.query_selector("textarea").unwrap();
+        let Some(Node::Element(element)) = document.node(id) else {
+            panic!("textarea")
+        };
+        assert_eq!(
+            form_control_text(&document, id, element),
+            Some("  first\n second  ".into())
+        );
+        let document =
+            crate::parser::parse_document("<textarea placeholder='hint'></textarea>").unwrap();
+        let id = document.query_selector("textarea").unwrap();
+        let Some(Node::Element(element)) = document.node(id) else {
+            panic!("textarea")
+        };
+        assert_eq!(
+            form_control_text(&document, id, element),
+            Some("hint".into())
+        );
+    }
+
+    #[test]
+    fn textarea_wrap_preserves_spaces_blank_lines_and_unicode() {
+        let style = ComputedStyle::default();
+        let input = "  alpha  beta\n\nΩmega";
+        assert_eq!(
+            wrap_textarea_lines(input, &style, 1000.0, false),
+            vec!["  alpha  beta", "", "Ωmega"]
+        );
+        let lines = wrap_textarea_lines("alpha  beta", &style, 40.0, false);
+        assert_eq!(lines.concat(), "alpha  beta");
+        assert!(lines.len() > 1);
+        assert_eq!(
+            wrap_textarea_lines("Ωmega", &style, 1.0, false).concat(),
+            "Ωmega"
+        );
+        assert_eq!(
+            wrap_textarea_lines("a very long line", &style, 1.0, true),
+            vec!["a very long line"]
+        );
+    }
+
+    #[test]
+    fn textarea_draws_separate_lines_preserves_blank_line_and_clips_content() {
+        let document = crate::parser::parse_document("<textarea style='width:180pt;height:70pt;font-size:10pt;line-height:12pt'>first\n\n  third</textarea>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, "first");
+        assert_eq!(runs[1].text, "  third");
+        assert!((runs[0].y - runs[1].y - 24.0).abs() < 0.01);
+        assert!(pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::BeginClip(_))));
+        assert!(pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::EndClip)));
+    }
+
+    #[test]
+    fn inline_block_top_and_bottom_align_to_line_edges() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><p><span style='display:inline-block;width:20pt;height:40pt;background:#0000ff'></span><span style='display:inline-block;vertical-align:top;width:20pt;height:10pt;background:#ff0000'></span><span style='display:inline-block;vertical-align:bottom;width:20pt;height:15pt;background:#00ff00'></span></p></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let boxes: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.r + rect.color.g + rect.color.b == 1.0 => {
+                    Some(rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(boxes.len(), 3);
+        let line_top = options.page.height_pt - options.page.margin_top_pt;
+        assert!((boxes[0].y + 40.0 - line_top).abs() < 0.01);
+        assert!((boxes[1].y + 10.0 - line_top).abs() < 0.01);
+        assert!((boxes[2].y - (line_top - 42.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn edge_aligned_atomic_boxes_minimize_line_height() {
+        let mut style = ComputedStyle::default();
+        style.font_size = 10.0;
+        style.line_height = 12.0;
+        style.line_height_is_normal = false;
+        style.line_height_multiplier = None;
+        let make_box = |alignment, height| {
+            let mut box_style = style.clone();
+            box_style.vertical_align = alignment;
+            InlineTextSegment {
+                text: String::new(),
+                style: box_style,
+                atomic: Some(std::rc::Rc::new(InlineAtomicBox {
+                    items: Vec::new(),
+                    width: 20.0,
+                    height,
+                    baseline: height,
+                })),
+            }
+        };
+        let top = make_box(VerticalAlign::Top, 40.0);
+        let bottom = make_box(VerticalAlign::Bottom, 30.0);
+        assert_eq!(
+            inline_line_metrics(std::slice::from_ref(&top), &style),
+            (10.0, 40.0)
+        );
+        assert_eq!(
+            inline_line_metrics(std::slice::from_ref(&bottom), &style),
+            (28.0, 30.0)
+        );
+        assert_eq!(inline_line_metrics(&[top, bottom], &style), (28.0, 40.0));
+    }
+
+    #[test]
+    fn border_box_dimensions_cannot_be_smaller_than_padding_and_borders() {
+        let mut style = ComputedStyle::default();
+        let pt = |points| crate::css::CssLength::Linear {
+            percent: 0.0,
+            points,
+        };
+        style.box_sizing = BoxSizing::BorderBox;
+        style.width = Some(pt(1.0));
+        style.height = Some(pt(1.0));
+        style.max_width = Some(pt(0.0));
+        style.max_height = Some(pt(0.0));
+        style.padding_left = 7.0;
+        style.padding_right = 9.0;
+        style.padding_top = 11.0;
+        style.padding_bottom = 13.0;
+        style.border_width = 2.0;
+        // Computed border shorthands populate all four longhands.
+        style.border_top_width = 2.0;
+        style.border_right_width = 2.0;
+        style.border_bottom_width = 2.0;
+        style.border_left_width = 2.0;
+        assert_eq!(resolve_box_width(&style, 100.0), 20.0);
+        assert_eq!(resolve_flow_box_width(&style, 100.0, 100.0), 20.0);
+        assert_eq!(resolve_box_height(&style, 20.0, 0.0, 100.0), 28.0);
+    }
+
+    #[test]
+    fn auto_width_minimum_wins_over_maximum_and_available_space() {
+        let mut style = ComputedStyle::default();
+        let pt = |points| crate::css::CssLength::Linear {
+            percent: 0.0,
+            points,
+        };
+        style.min_width = Some(pt(120.0));
+        style.max_width = Some(pt(80.0));
+        style.padding_left = 7.0;
+        style.padding_right = 9.0;
+        assert_eq!(resolve_box_width(&style, 100.0), 136.0);
+        assert_eq!(resolve_flow_box_width(&style, 100.0, 100.0), 136.0);
+        style.box_sizing = BoxSizing::BorderBox;
+        assert_eq!(resolve_box_width(&style, 100.0), 120.0);
+    }
+
+    #[test]
+    fn aspect_ratio_uses_the_box_selected_by_box_sizing() {
+        let mut style = ComputedStyle::default();
+        style.aspect_ratio = Some(2.0);
+        style.padding_left = 10.0;
+        style.padding_right = 10.0;
+        style.padding_top = 15.0;
+        style.padding_bottom = 15.0;
+        assert_eq!(resolve_box_height(&style, 120.0, 0.0, 300.0), 80.0);
+        style.box_sizing = BoxSizing::BorderBox;
+        assert_eq!(resolve_box_height(&style, 120.0, 0.0, 300.0), 60.0);
+    }
+
+    #[test]
+    fn zero_border_box_with_padding_reserves_height_in_document_flow() {
+        let document = crate::parser::parse_document("<body style='margin:0'><div style='box-sizing:border-box;width:0;height:0;padding:10pt;background:#0000ff'></div><div>after</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((rect.width, rect.height), (20.0, 20.0));
+        let after = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert!((after.y + after.font_size - rect.y).abs() < 0.01);
+    }
+
+    #[test]
+    fn inline_block_contains_floats_in_its_auto_height() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;width:60pt;background:#0000ff'><span style='float:left;width:20pt;height:30pt;background:#ff0000'></span></span>after</p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.height, 30.0);
+    }
+
+    #[test]
+    fn inline_block_minimum_size_and_hidden_box_reserve_space() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;min-width:50pt;min-height:20pt;padding:2pt;background:#0000ff'>one</span><span style='display:inline-block;visibility:hidden;width:30pt'>secret</span>after</p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((rect.width, rect.height), (54.0, 24.0));
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert!(!runs.iter().any(|run| run.text.contains("secret")));
+        let after = runs.iter().find(|run| run.text == "after").unwrap();
+        assert!((after.x - options.page.margin_left_pt - 84.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inline_block_content_box_height_includes_padding() {
+        let document = crate::parser::parse_document("<p><span style='display:inline-block;width:60pt;height:28pt;padding:4pt;background:#0000ff'>tile</span></p>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.width, 68.0);
+        assert_eq!(rect.height, 36.0);
+    }
+
+    #[test]
+    fn inline_blocks_keep_boxes_and_wrap_as_atomic_items() {
+        let html = "<body style='margin:0;font-size:10pt;line-height:12pt'>\
+            <div style='width:100pt'><span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>one</span>\
+            <span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>two</span>\
+            <span style='display:inline-block;width:40pt;height:20pt;background:#0000ff'>three</span></div></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let boxes: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(boxes.len(), 3);
+        assert!((boxes[1].x - boxes[0].x - 40.0).abs() < 0.01);
+        assert!((boxes[1].y - boxes[0].y).abs() < 0.01);
+        assert!((boxes[2].x - boxes[0].x).abs() < 0.01);
+        assert!((boxes[0].y - boxes[2].y - 20.0).abs() < 0.01);
+        assert!(boxes
+            .iter()
+            .all(|rect| (rect.width - 40.0).abs() < 0.01 && (rect.height - 20.0).abs() < 0.01));
+        let text: String = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "onetwothree");
+    }
+
+    #[test]
+    fn empty_inline_block_keeps_its_dimensions_and_moves_whole_to_next_page() {
+        let html = "<body style='margin:0'><div style='height:50pt'>before</div>\
+            <p style='margin:0'><span style='display:inline-block;width:30pt;height:40pt;background:#0000ff'></span>after</p></body>";
+        let document = crate::parser::parse_document(html).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 150.0,
+            height_pt: 80.0,
+            margin_top_pt: 5.0,
+            margin_bottom_pt: 5.0,
+            margin_left_pt: 5.0,
+            margin_right_pt: 5.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 2);
+        assert!(!pages[0]
+            .items
+            .iter()
+            .any(|item| matches!(item, LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0)));
+        let rect = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(rect.width, 30.0);
+        assert_eq!(rect.height, 40.0);
+        let after = pages[1]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert!((after.x - 35.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inline_style_boundaries_do_not_split_words() {
+        let normal = ComputedStyle::default();
+        let mut bold = normal.clone();
+        bold.font_weight = FontWeight::Bold;
+        let tokens = tokenize_inline_segments(&[
+            InlineTextSegment {
+                atomic: None,
+                text: "lead ab".into(),
+                style: normal.clone(),
+            },
+            InlineTextSegment {
+                atomic: None,
+                text: "cdef".into(),
+                style: bold,
+            },
+            InlineTextSegment {
+                atomic: None,
+                text: " tail".into(),
+                style: normal,
+            },
+        ]);
+        let width = inline_segments_wrap_width(&tokens[..3], 100.0) + 0.1;
+        let (first, next) = wrap_one_inline_line(&tokens, 0, width, false);
+        assert_eq!(
+            first
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "lead"
+        );
+        let (second, _) = wrap_one_inline_line(&tokens, next, width, false);
+        assert_eq!(
+            second
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<String>(),
+            "abcdef"
+        );
+        assert_eq!(second[1].style.font_weight, FontWeight::Bold);
+        let (oversized, next) = wrap_one_inline_line(&tokens, next, 1.0, false);
+        assert_eq!(
+            oversized.len(),
+            2,
+            "an unbreakable word overflows as a whole"
+        );
+        assert_eq!(tokens[next].text, "tail");
+    }
+
+    #[test]
+    fn nonbreaking_spaces_survive_inline_and_plain_text_wrapping() {
+        let mut style = ComputedStyle::default();
+        style.overflow_wrap = OverflowWrap::Normal;
+        for separator in ['\u{00a0}', '\u{202f}'] {
+            let text = format!("alpha{separator}beta");
+            let tokens = tokenize_inline_segments(&[InlineTextSegment {
+                atomic: None,
+                text: text.clone(),
+                style: style.clone(),
+            }]);
+            assert_eq!(tokens.len(), 1);
+            let (line, next) = wrap_one_inline_line(&tokens, 0, 1.0, false);
+            assert_eq!(line[0].text, text);
+            assert_eq!(next, 1);
+            assert_eq!(wrap_text_with_style(&text, &style, 1.0), vec![text]);
+        }
+    }
+
+    #[test]
+    fn html_nonbreaking_space_keeps_words_on_one_line() {
+        for content in ["alpha&nbsp;beta", "<strong>alpha</strong>&nbsp;beta"] {
+            let html = format!("<p style='width:20pt;overflow-wrap:normal'>{content}</p>");
+            let document = crate::parser::parse_document(&html).unwrap();
+            let stylesheet = Stylesheet::from_document(&document);
+            let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+            let runs: Vec<_> = pages[0]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(run) => Some(run),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+                "alpha\u{00a0}beta"
+            );
+            assert!(runs.iter().all(|run| (run.y - runs[0].y).abs() < 0.01));
+        }
+    }
+
+    #[test]
+    fn justified_inline_runs_emit_the_spacing_used_for_placement() {
+        let document = crate::parser::parse_document(
+            "<p style='text-align:justify;text-align-last:justify;width:180pt'>alpha <strong>beta</strong> gamma</p>",
+        ).unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &RenderOptions::default());
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert!(runs
+            .iter()
+            .any(|run| run.text == " " && run.word_spacing > 0.0));
+        for pair in runs.windows(2) {
+            let run = pair[0];
+            let painted_width = estimate_text_width_with_spacing(
+                &run.text,
+                run.font_size,
+                run.font_face,
+                run.font_weight,
+                run.letter_spacing,
+                run.word_spacing,
+            );
+            assert!(
+                (run.x + painted_width - pair[1].x).abs() < 0.01,
+                "painted advance must match the next run's position"
+            );
+        }
+    }
+
+    #[test]
+    fn styled_container_text_shares_one_line_and_one_box() {
+        let document = crate::parser::parse_document(
+            r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                div { width: 180pt; padding: 5pt; background: #2563eb;
+                      position: relative; left: 20pt; top: 8pt; }
+            </style>
+            <body><div><span>alpha</span> <strong>beta</strong> gamma</div></body>
+        "#,
+        )
+        .unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert_eq!(pages.len(), 1);
+        let runs: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(run) => Some(run),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "alpha beta gamma"
+        );
+        assert!(runs.iter().all(|run| (run.y - runs[0].y).abs() < 0.01));
+        assert!((runs[0].x - options.page.margin_left_pt - 25.0).abs() < 0.01);
+        let backgrounds: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b > 0.7 && rect.color.r < 0.3 => Some(rect),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            backgrounds.len(),
+            1,
+            "only the container paints its background"
+        );
+        assert!((backgrounds[0].height - 22.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn floats_wrap_following_text_and_clear_moves_flow_below_float() {
+        let html = r#"
+            <style>
+                @page { size: Letter; margin: 0; }
+                body { font-size: 12px; line-height: 14px; }
+                .left { float: left; width: 96px; height: 20px; margin-right: 16px; background: #2563eb; }
+                .after { clear: both; }
+            </style>
+            <div class="left"></div>
+            <p>Text that wraps beside the left floating box for several lines of content. More words make the float interaction cross multiple line boxes and continue after the float has ended so the available width can expand again.</p>
+            <p class="after">Text after clear should be below the floating box.</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &crate::RenderOptions::default());
+        let items = &pages[0].items;
+        let float_rect = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b > 0.7 && rect.color.r < 0.3 => Some(rect),
+                _ => None,
+            })
+            .expect("float background");
+        let cleared_index = items
+            .iter()
+            .position(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Text(text) if text.text.starts_with("Text after clear")
+                )
+            })
+            .expect("cleared text");
+        let wrapped_texts = items[..cleared_index]
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let wrapped_text = wrapped_texts.first().expect("wrapped text");
+        let cleared_text = match &items[cleared_index] {
+            LayoutItem::Text(text) => text,
+            _ => unreachable!("cleared index points to text"),
+        };
+
+        assert!(wrapped_text.x >= 110.0, "x={}", wrapped_text.x);
+        assert!(
+            wrapped_texts.iter().any(|text| text.x < wrapped_text.x),
+            "the paragraph should regain full width after the float ends: {wrapped_texts:#?}"
+        );
+        assert!(cleared_text.x < wrapped_text.x, "x={}", cleared_text.x);
+        assert!(
+            cleared_text.y < float_rect.y,
+            "y={} float_bottom={}",
+            cleared_text.y,
+            float_rect.y
+        );
+    }
+
+    #[test]
+    fn inline_segments_wrap_around_float_and_preserve_styles_and_breaks() {
+        let html = r##"
+            <style>
+                @page { size: Letter; margin: 0; }
+                body { font-size: 12pt; line-height: 14pt; }
+                p { margin: 0; }
+                .left { float: left; width: 96pt; height: 20pt; margin-right: 16pt; background: #2563eb; }
+                strong { color: #dc2626; font-weight: 700; }
+                a { color: #2563eb; }
+            </style>
+            <div class="left"></div>
+            <p>Intro <strong>emphasis</strong> continues beside the float with enough words to recover the full line width after the box ends and <a href="#details">link</a>. <br>Hard break keeps this text on its own line.</p>
+        "##;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let pages = layout_document(&document, &stylesheet, &crate::RenderOptions::default());
+        let text_runs = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let first = text_runs.first().expect("inline text beside float");
+        let emphasis = text_runs
+            .iter()
+            .find(|text| text.text == "emphasis")
+            .expect("styled inline segment");
+        let link = text_runs
+            .iter()
+            .find(|text| text.text == "link")
+            .expect("anchor inline segment");
+        let hard_break = text_runs
+            .iter()
+            .find(|text| text.text == "Hard")
+            .expect("text after br");
+
+        assert!(
+            first.x > 90.0,
+            "first inline line should avoid float: {first:?}"
+        );
+        assert_eq!(emphasis.font_weight, FontWeight::Bold);
+        assert!(emphasis.color.r > 0.7 && emphasis.color.g < 0.3);
+        assert!(link.color.b > 0.7 && link.color.r < 0.3);
+        assert!(text_runs.iter().any(|text| text.x < first.x));
+        assert!(hard_break.y < first.y, "br should advance to another line");
+    }
+
+    #[test]
+    fn long_text_float_reflows_with_full_width_on_continuation_page() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { margin: 0; }
+                .left { float: left; width: 60pt; height: 65pt; margin-right: 8pt; background: #2563eb; }
+            </style>
+            <div class="left"></div>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(
+            pages.len() >= 2,
+            "long flow should continue to another page"
+        );
+        let page_text = |page_index: usize| {
+            pages[page_index]
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let first_page = page_text(0);
+        let second_page = page_text(1);
+        assert!(!first_page.is_empty(), "float page should contain text");
+        assert!(
+            !second_page.is_empty(),
+            "continuation page should contain text"
+        );
+        assert!(
+            first_page[0].x > 70.0,
+            "first page should wrap beside float: {:?}",
+            first_page[0]
+        );
+        assert!(
+            second_page[0].x < first_page[0].x,
+            "continuation page should discard the old float inset: first={:?} second={:?}",
+            first_page[0],
+            second_page[0]
+        );
+        let rendered = pages
+            .iter()
+            .flat_map(|page| page.items.iter())
+            .filter_map(|item| match item {
+                LayoutItem::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|text| text.contains("tango")));
+    }
+
+    #[test]
+    fn wrapped_flex_container_can_start_before_all_rows_fit() {
+        let html = r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { width: 80pt; margin: 0; }
+                .flex { display: flex; flex-wrap: wrap; width: 160pt; gap: 4pt; padding: 4pt; }
+                .item { flex: 0 0 76pt; height: 20pt; background: #bfdbfe; }
+            </style>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen</p>
+            <div class="flex">
+                <div class="item">A</div><div class="item">B</div>
+                <div class="item">C</div><div class="item">D</div>
+                <div class="item">E</div><div class="item">F</div>
+            </div>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 200.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let item_pages = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text)
+                        if matches!(text.text.as_str(), "A" | "B" | "C" | "D" | "E" | "F") =>
+                    {
+                        Some((page_index, text.text.as_str()))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_pages.len(),
+            6,
+            "all flex items should render: {item_pages:?}"
+        );
+        assert!(
+            item_pages.iter().any(|(page, _)| *page == 0),
+            "the first flex row should use remaining space before the continuation page: {item_pages:?}"
+        );
+    }
+
+    #[test]
+    fn grid_rows_stay_together_when_the_grid_crosses_a_page() {
+        let html = r#"
+            <style>
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { width: 80pt; margin: 0; }
+                .grid { display: grid; grid-template-columns: repeat(2, 76pt); gap: 4pt; width: 160pt; }
+                .item { height: 20pt; background: #bfdbfe; }
+            </style>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen</p>
+            <div class="grid">
+                <div class="item">A</div><div class="item">B</div>
+                <div class="item">C</div><div class="item">D</div>
+                <div class="item">E</div><div class="item">F</div>
+            </div>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 200.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let item_pages = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text)
+                        if matches!(text.text.as_str(), "A" | "B" | "C" | "D" | "E" | "F") =>
+                    {
+                        Some((page_index, text.text.as_str()))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            item_pages.len(),
+            6,
+            "all grid items should render: {item_pages:?}"
+        );
+        for pair in [(&"A", &"B"), (&"C", &"D"), (&"E", &"F")] {
+            let first = item_pages
+                .iter()
+                .find(|(_, text)| text == pair.0)
+                .expect("first item in grid row");
+            let second = item_pages
+                .iter()
+                .find(|(_, text)| text == pair.1)
+                .expect("second item in grid row");
+            assert_eq!(
+                first.0, second.0,
+                "grid row split across pages: {item_pages:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tall_table_rows_fragment_across_pages_and_repeat_headers() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                table { width: 200pt; border-collapse: collapse; }
+                th, td { border: 1pt solid #64748b; padding: 2pt; vertical-align: top; }
+            </style>
+            <table>
+                <thead><tr><th>Header key</th><th>Header value</th></tr></thead>
+                <tbody><tr>
+                    <td>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu</td>
+                    <td>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour</td>
+                </tr></tbody>
+            </table>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(
+            pages.len() >= 2,
+            "tall table row should continue across pages: {}",
+            pages.len()
+        );
+        let text_runs = pages
+            .iter()
+            .enumerate()
+            .flat_map(|(page_index, page)| {
+                page.items.iter().filter_map(move |item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => {
+                        Some((page_index, text))
+                    }
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        let rendered = text_runs
+            .iter()
+            .map(|(_, text)| text.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(rendered.contains("zulu"), "last left-column line was lost");
+        assert!(
+            rendered.contains("twentyfour"),
+            "last right-column line was lost"
+        );
+        let header_pages = text_runs
+            .iter()
+            .filter(|(page, text)| {
+                *page > 0
+                    && (text.text.contains("Header key") || text.text.contains("Header value"))
+            })
+            .map(|(page, _)| *page)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(
+            header_pages.len() >= 1,
+            "header should repeat on continuation pages: {header_pages:?}"
+        );
+        for (page_index, text) in text_runs {
+            assert!(
+                text.y >= options.page.margin_bottom_pt,
+                "text escaped below page {page_index}: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn fixed_positioned_content_repeats_on_every_printed_page() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                .fixed { position: fixed; top: 4pt; left: 10pt; width: 200pt; height: 12pt; color: #ffffff; background: #1d4ed8; }
+                p { margin: 0 0 8pt; }
+            </style>
+            <div class="fixed">Fixed header</div>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu</p>
+            <p>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour</p>
+            <p>red orange yellow green blue indigo violet cyan magenta black white gray silver gold copper bronze</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+
+        assert!(pages.len() >= 2, "fixture should span several pages");
+        for (page_index, page) in pages.iter().enumerate() {
+            let fixed_runs = page
+                .items
+                .iter()
+                .filter(
+                    |item| matches!(item, LayoutItem::Text(text) if text.text == "Fixed header"),
+                )
+                .count();
+            assert_eq!(
+                fixed_runs, 1,
+                "fixed content missing or duplicated on page {page_index}"
+            );
+        }
+        let normal_text_pages = pages
+            .iter()
+            .filter(|page| {
+                page.items.iter().any(
+                    |item| matches!(item, LayoutItem::Text(text) if text.text.contains("alpha")),
+                )
+            })
+            .count();
+        assert_eq!(
+            normal_text_pages, 1,
+            "normal flow text should not duplicate"
+        );
+    }
+
+    #[test]
+    fn relative_position_offsets_paint_without_changing_flow() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                .relative { position: relative; left: 20pt; top: 8pt; width: 80pt; height: 20pt; background: #2563eb; color: #ffffff; }
+                .after { margin: 0; }
+            </style>
+            <div class="relative">relative content</div>
+            <p class="after">flow continues below the original box position</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        let items = &pages[0].items;
+        let relative_background = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect)
+                    if rect.color.b > 0.7 && rect.color.r < 0.3 && rect.color.g < 0.5 =>
+                {
+                    Some(rect)
+                }
+                _ => None,
+            })
+            .expect("relative background");
+        let relative_text = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text == "relative content" => Some(text),
+                _ => None,
+            })
+            .expect("relative text");
+        let following_text = items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(text) if text.text.contains("flow continues") => Some(text),
+                _ => None,
+            })
+            .expect("following flow text");
+
+        assert!(
+            (relative_background.x - 30.0).abs() < 0.01,
+            "left offset was ignored: {relative_background:?}"
+        );
+        assert!(
+            (relative_text.x - 30.0).abs() < 0.01,
+            "text left offset was ignored: {relative_text:?}"
+        );
+        assert!(
+            (relative_text.y - 110.0).abs() < 0.01,
+            "top offset was ignored: {relative_text:?}"
+        );
+        assert_eq!(
+            following_text.x, 10.0,
+            "relative offset leaked into following flow"
+        );
+        assert!(
+            (following_text.y - 98.0).abs() < 0.1,
+            "following content should retain its normal flow position: relative={relative_text:?} following={following_text:?}"
+        );
+    }
+
+    #[test]
+    fn relative_offset_survives_text_continuation_pages() {
+        let html = r#"
+            <style>
+                @page { size: 220pt 140pt; margin: 10pt; }
+                body { margin: 0; font-size: 10pt; line-height: 12pt; }
+                p { position: relative; left: 16pt; top: 4pt; margin: 0; }
+            </style>
+            <p>alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray yankee zulu one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone thirtytwo thirtythree thirtyfour thirtyfive thirtysix thirtyseven thirtyeight thirtynine forty</p>
+        "#;
+        let document = crate::parser::parse_document(html).expect("valid HTML");
+        let stylesheet = Stylesheet::from_document(&document);
+        let mut options = RenderOptions::default();
+        options.page = PageOptions {
+            width_pt: 220.0,
+            height_pt: 140.0,
+            margin_top_pt: 10.0,
+            margin_right_pt: 10.0,
+            margin_bottom_pt: 10.0,
+            margin_left_pt: 10.0,
+        };
+        let pages = layout_document(&document, &stylesheet, &options);
+        assert!(pages.len() >= 2, "text should continue onto another page");
+        let text_runs = pages
+            .iter()
+            .flat_map(|page| {
+                page.items.iter().filter_map(|item| match item {
+                    LayoutItem::Text(text) if !text.text.trim().is_empty() => Some(text),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(!text_runs.is_empty());
+        assert!(
+            text_runs.iter().all(|text| text.x > 20.0),
+            "relative offset was lost on a continuation page: {text_runs:#?}"
+        );
+    }
+
+    #[test]
     fn splits_long_words_at_soft_breaks_before_character_breaking() {
         let chunks = split_long_word(
             "INV-2026-1001",
@@ -10793,8 +13758,8 @@ mod tests {
         assert_eq!(text_runs[0].0, "One");
         assert_eq!(text_runs[1].0, "Two");
         assert!(
-            (text_runs[0].1 - text_runs[1].1 - 12.0).abs() < 0.01,
-            "whitespace text nodes between spans must not add an empty line: {text_runs:?}"
+            (text_runs[0].1 - text_runs[1].1).abs() < 0.01,
+            "inline spans separated by collapsible whitespace must share a line: {text_runs:?}"
         );
     }
 
@@ -12320,6 +15285,15 @@ Beta</section>
         let stylesheet = Stylesheet::from_document(&document);
         let mut options = RenderOptions::default();
         options.base_url = Some(examples_dir.to_string_lossy().to_string());
+        options.allow_local_assets = false;
+        let blocked = layout_document(&document, &stylesheet, &options);
+        assert!(blocked.iter().all(|page| page
+            .items
+            .iter()
+            .all(|item| !matches!(item, LayoutItem::Image(_)))));
+        let absolute = examples_dir.join("assets/generic-photo.jpg");
+        assert!(load_image_asset(&absolute.to_string_lossy(), &options).is_none());
+        options.allow_local_assets = true;
         let pages = layout_document(&document, &stylesheet, &options);
         let image = pages[0].items.iter().find_map(|item| match item {
             LayoutItem::Image(image) => Some(image),

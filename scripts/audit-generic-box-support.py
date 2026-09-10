@@ -33,9 +33,9 @@ checks = {
         "inset_left",
         "inset_right",
         "LayoutItem::RoundRect(RoundRect",
-        "background_items(style, box_x, self.current_y, box_width, height)",
+        "background_items(\n                        style,\n                        self.options,\n                        box_x,\n                        self.current_y,\n                        box_width,\n                        height,\n                    )",
         "horizontal_box_extras",
-        "self.inset_left += style.margin_left + style.padding_left",
+        "self.inset_left += flow.margin_left + style.padding_left",
     ],
     FIXTURE: [
         "GENERIC HTML FIXTURE",

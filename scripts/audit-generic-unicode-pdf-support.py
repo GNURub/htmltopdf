@@ -20,6 +20,9 @@ checks = {
         "Inversión total: 550,00 €",
         "● Estado activo",
         "Niño, acción, información, útil, Málaga",
+        "Entidades: &euro; &bull; &ndash; &lt;span&gt; &amp; preservadas.",
+        "Unicode fuera de WinAnsi: Ω Привет.",
+        "The parser must ignore this comment, including the fake > tag inside it.",
     ],
 }
 errors = []

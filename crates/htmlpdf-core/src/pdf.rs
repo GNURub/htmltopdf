@@ -1,8 +1,8 @@
 use crate::css::{Color, FontFace, FontStyle, FontWeight, LinearGradient, TextDecoration};
 use crate::layout::{
-    estimate_text_width_with_spacing, is_boldish, Circle, CircleStroke, ClipRect, GradientRect,
-    ImageFormat, ImageRect, LayoutItem, LayoutPage, Line, PathCommand, PngColorSpace, Polygon,
-    RoundRect, StrokeRect, SvgPath, TrueTypeMetrics,
+    estimate_text_width_with_spacing, is_boldish, is_winansi_char, Circle, CircleStroke, ClipRect,
+    GradientRect, ImageFormat, ImageRect, LayoutItem, LayoutPage, Line, PathCommand, PngColorSpace,
+    Polygon, RoundRect, StrokeRect, SvgPath, TrueTypeMetrics,
 };
 use crate::PageOptions;
 use std::collections::BTreeSet;
@@ -49,6 +49,7 @@ pub fn write_pdf(pages: &[LayoutPage], _page: &PageOptions) -> Result<Vec<u8>, S
     let (image_resources, page_image_names, image_object_count) = collect_image_resources(pages);
     let font_resources = pdf_font_resources();
     let font_usage = collect_font_usage(pages);
+    let mut embedded_fonts = Vec::with_capacity(font_resources.len());
     let mut objects: Vec<(usize, Vec<u8>)> = Vec::new();
     let catalog_id = 1usize;
     let pages_id = 2usize;
@@ -68,7 +69,12 @@ pub fn write_pdf(pages: &[LayoutPage], _page: &PageOptions) -> Result<Vec<u8>, S
     let empty_font_usage = BTreeSet::new();
     for (idx, font) in font_resources.iter().enumerate() {
         let used_cids = font_usage.get(idx).unwrap_or(&empty_font_usage);
-        push_font_objects(&mut objects, *font, used_cids);
+        embedded_fonts.push(push_font_objects(
+            &mut objects,
+            *font,
+            used_cids,
+            font_requires_embedding(used_cids),
+        ));
     }
     for alpha_idx in 0..=100usize {
         let object_id = alpha_object_id(alpha_idx);
@@ -99,7 +105,7 @@ pub fn write_pdf(pages: &[LayoutPage], _page: &PageOptions) -> Result<Vec<u8>, S
     for (idx, layout_page) in pages.iter().enumerate() {
         let page_id = page_object_id(idx, image_object_count);
         let content_id = content_object_id(idx, image_object_count);
-        let stream = content_stream(layout_page, &page_image_names[idx]);
+        let stream = content_stream(layout_page, &page_image_names[idx], &embedded_fonts);
         let shading_resources = shading_resources(layout_page);
         let shading_resource_block = if shading_resources.is_empty() {
             String::new()
@@ -166,6 +172,18 @@ fn collect_font_usage(pages: &[LayoutPage]) -> Vec<BTreeSet<u32>> {
     usage
 }
 
+fn font_requires_embedding(used_cids: &BTreeSet<u32>) -> bool {
+    std::env::var_os("HTMLPDF_EMBED_FONTS").is_some() || has_non_winansi_char(used_cids)
+}
+
+fn has_non_winansi_char(used_cids: &BTreeSet<u32>) -> bool {
+    used_cids.iter().any(|cid| {
+        char::from_u32(*cid)
+            .map(|ch| !is_winansi_char(ch))
+            .unwrap_or(true)
+    })
+}
+
 fn font_resource_index(font_face: FontFace, font_weight: FontWeight) -> usize {
     match (font_face, font_weight) {
         (FontFace::Sans, FontWeight::Normal) => 0,
@@ -192,7 +210,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Sans,
             font_weight: FontWeight::Normal,
             fallback_subtype: "Type1",
-            fallback_base_font: "NotoSans-Regular",
+            fallback_base_font: "Helvetica",
             path_candidates: &[
                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
                 "/home/gnurub/.local/share/fonts/NotoSans-VariableFont_wdth,wght.ttf",
@@ -210,7 +228,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Sans,
             font_weight: FontWeight::Bold,
             fallback_subtype: "Type1",
-            fallback_base_font: "NotoSans-Bold",
+            fallback_base_font: "Helvetica-Bold",
             path_candidates: &[
                 "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
                 "/home/gnurub/.local/share/fonts/NotoSans-VariableFont_wdth,wght.ttf",
@@ -284,7 +302,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Lato,
             font_weight: FontWeight::Normal,
             fallback_subtype: "Type1",
-            fallback_base_font: "Lato-Regular",
+            fallback_base_font: "Helvetica",
             path_candidates: &["/usr/share/fonts/truetype/lato/Lato-Regular.ttf"],
         },
         PdfFontResource {
@@ -298,7 +316,7 @@ fn pdf_font_resources() -> Vec<PdfFontResource> {
             font_face: FontFace::Lato,
             font_weight: FontWeight::Bold,
             fallback_subtype: "Type1",
-            fallback_base_font: "Lato-Bold",
+            fallback_base_font: "Helvetica-Bold",
             path_candidates: &["/usr/share/fonts/truetype/lato/Lato-Bold.ttf"],
         },
     ]
@@ -308,8 +326,9 @@ fn push_font_objects(
     objects: &mut Vec<(usize, Vec<u8>)>,
     font: PdfFontResource,
     used_cids: &BTreeSet<u32>,
-) {
-    if std::env::var_os("HTMLPDF_EMBED_FONTS").is_some() {
+    should_embed: bool,
+) -> bool {
+    if should_embed {
         if let Some(bytes) = font
             .path_candidates
             .iter()
@@ -328,11 +347,12 @@ fn push_font_objects(
                     cid_font_object(font, used_cids, &metrics),
                 ));
                 objects.push((font.object_id, type0_font_object(font)));
-                return;
+                return true;
             }
         }
     }
     objects.push((font.object_id, fallback_font_object(font)));
+    false
 }
 
 fn type0_font_object(font: PdfFontResource) -> Vec<u8> {
@@ -613,7 +633,7 @@ fn shading_resources(page: &LayoutPage) -> String {
     resources
 }
 
-fn content_stream(page: &LayoutPage, image_names: &[String]) -> Vec<u8> {
+fn content_stream(page: &LayoutPage, image_names: &[String], embedded_fonts: &[bool]) -> Vec<u8> {
     let mut out = String::new();
     out.push_str(&format!("% page {}\n", page.number));
     let mut shading_index = 0usize;
@@ -658,6 +678,10 @@ fn content_stream(page: &LayoutPage, image_names: &[String]) -> Vec<u8> {
             }
             LayoutItem::Text(text) => {
                 let font = pdf_font_name(text.font_face, text.font_weight);
+                let embedded = embedded_fonts
+                    .get(font_resource_index(text.font_face, text.font_weight))
+                    .copied()
+                    .unwrap_or(false);
                 if let Some(shadow) = text.text_shadow {
                     let shadow_color = shadow.color.with_opacity(text.color.a * shadow.color.a);
                     push_text_run(
@@ -667,9 +691,10 @@ fn content_stream(page: &LayoutPage, image_names: &[String]) -> Vec<u8> {
                         text.x + shadow.offset_x,
                         text.y - shadow.offset_y,
                         shadow_color,
+                        embedded,
                     );
                 }
-                push_text_run(&mut out, font, text, text.x, text.y, text.color);
+                push_text_run(&mut out, font, text, text.x, text.y, text.color, embedded);
             }
         }
     }
@@ -683,9 +708,10 @@ fn push_text_run(
     x: f32,
     y: f32,
     color: Color,
+    embedded: bool,
 ) {
     let (a, b, c, d) = text_transform_matrix(text.rotation_deg, text.font_style);
-    let text_object = if std::env::var_os("HTMLPDF_EMBED_FONTS").is_some() {
+    let text_object = if embedded {
         pdf_cid_hex_string(&text.text)
     } else {
         pdf_text_string(&text.text)
@@ -1484,6 +1510,43 @@ fn winansi_byte(ch: char) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unembedded_fonts_use_portable_standard_pdf_names() {
+        let expected = [
+            "Helvetica",
+            "Helvetica-Bold",
+            "Times-Roman",
+            "Times-Bold",
+            "Courier",
+            "Courier-Bold",
+            "Helvetica",
+            "Helvetica-Bold",
+        ];
+        for (font, name) in pdf_font_resources().into_iter().zip(expected) {
+            let mut objects = Vec::new();
+            assert!(!push_font_objects(
+                &mut objects,
+                font,
+                &BTreeSet::new(),
+                false
+            ));
+            assert_eq!(objects.len(), 1);
+            let dictionary = String::from_utf8(objects[0].1.clone()).unwrap();
+            assert!(dictionary.contains(&format!("/BaseFont /{name} /Encoding")));
+        }
+    }
+
+    #[test]
+    fn automatic_font_embedding_only_triggers_outside_winansi() {
+        let mut used = BTreeSet::new();
+        used.insert('A' as u32);
+        used.insert('€' as u32);
+        assert!(!has_non_winansi_char(&used));
+
+        used.insert('Ω' as u32);
+        assert!(has_non_winansi_char(&used));
+    }
 
     #[test]
     fn cid_hex_text_keeps_unicode_codepoints_for_embedded_fonts() {

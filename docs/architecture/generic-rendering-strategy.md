@@ -92,6 +92,7 @@ HTML:
 - Text blocks: `h1`, `h2`, `h3`, `p`, `small`
 - Basic table layout: `table`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td`, including nested block text inside cells and rounded header backgrounds for `border-radius` tables
 - Metadata ignored: `head`, `title`, `meta`
+- HTML comments are ignored without leaking tag-like text; common named entities plus decimal and hexadecimal numeric character references are decoded in text and attributes
 - `style` and `script` are consumed by the renderer, not painted
 - First-pass inline SVG shapes: `svg`, filled/stroked `rect`, `circle`, stroked `circle`, `line`, `polygon`, `text`, and basic `path` commands (`M`, `L`, `H`, `V`, `C`, `Q`, `Z`) with `viewBox`, basic fill/stroke colors, `fill-opacity`, `stroke-opacity`, `stroke-linecap="round"`, `currentColor`, and averaged-stop fallback for `url(#linearGradient)`/`url(#radialGradient)` paint servers including `stop-opacity`
 
@@ -103,9 +104,10 @@ CSS:
 - First-pass `overflow: hidden|clip` clipping for rectangular and rounded containers
 - Browser-like non-painted content handling for `hidden`, `aria-hidden="true"`, `visibility: hidden`, `template`, and unsupported embedded media containers such as `iframe`
 - Box model: margins, padding, `width`, `min-width`, `max-width`, `height`, `min-height`, plus first-pass logical aliases such as `inline-size`, `min-block-size`, `padding-inline`, `margin-block`, and `border-inline-start`
+- Classic document flow: `float: left|right` with text wrapping, styled inline segments, and `clear: left|right|both` across normal-flow siblings
 - First-pass positioned layout for `position: relative|absolute|fixed|sticky` with `top`, `right`, `bottom`, `left`, and logical `inset-*` aliases; absolute/fixed boxes are painted out of normal flow
 - Modern length functions for layout-critical properties: `calc(...)`, `min(...)`, `max(...)`, `clamp(...)`, percentages, `px`, `pt`, `mm`, `cm`, `in`, `rem`, `em`
-- Inherited text styling: `font-size`, `line-height`, `font-family` mapped to built-in sans/serif/monospace PDF fonts, `font-weight`, `letter-spacing`, `text-transform`, `<br>` hard line breaks, `white-space`, `overflow-wrap`, `color`, `text-align`
+- Inherited text styling: `font-size`, `line-height`, `font-family` mapped to built-in sans/serif/monospace PDF fonts, `font-weight`, `letter-spacing`, `text-transform`, `<br>` hard line breaks, `white-space`, `overflow-wrap`, `color`, `text-align`; local TrueType CID embedding is selected automatically for characters outside WinAnsi and can still be forced globally with `HTMLPDF_EMBED_FONTS=1`
 - Backgrounds and effects: solid/alpha colors, first-pass angle-aware multi-stop `linear-gradient(...)` including positioned stops and linear layers inside compound `background`, document-level body/html backgrounds bounded to the print content box with white print-margin masks, first-pass text `transform: rotate(...)`, first-pass `box-shadow`, and `filter: drop-shadow(...)` mapped to the lightweight shadow model
 - First-pass inherited subtree opacity approximation via `opacity`
 - Borders: `border`, side borders (`border-left`, `border-bottom`, etc.), `border-width`, `border-color`, `border-radius`, style-aware table cell borders, plus first-pass `border-collapse: collapse` table row/border compaction

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Paginated float flow fixture</title>
+  <style>
+    @page { size: 220pt 140pt; margin: 10pt; }
+    body { margin: 0; color: #172033; font-family: sans-serif; font-size: 10pt; line-height: 12pt; }
+    p { margin: 0; }
+    .float-left {
+      float: left;
+      width: 60pt;
+      height: 65pt;
+      margin-right: 8pt;
+      background: #2563eb;
+    }
+  </style>
+</head>
+<body>
+  <div class="float-left"></div>
+  <p>
+    Este texto comienza junto al float y continúa durante varias líneas para
+    cruzar el final de la primera página. Al crear la página siguiente debe
+    recuperar todo el ancho disponible, sin conservar el inset de la caja
+    flotante anterior. El contenido sigue siendo texto normal y seleccionable
+    dentro del PDF generado por el motor ligero. Esta segunda parte fuerza la
+    fragmentación del párrafo y permite comprobar que el texto no desaparece,
+    no se superpone y mantiene su posición correcta al comenzar la continuación.
+    La composición debe seguir siendo estable incluso cuando el float ocupa
+    casi toda la altura útil de la primera página.
+  </p>
+</body>
+</html>
