@@ -74,3 +74,19 @@ particular, intrinsic sizing still uses approximate text measurements;
 `vertical-align` variants, baseline selection with positioned descendants,
 oversized atomic boxes, nested fixed-position overlays, and full mixed-flow
 layout need further validation and implementation.
+
+## Sizing constraints
+
+The general and normal-flow width resolvers now share the same calculation,
+including auto widths with min/max constraints. A minimum width takes priority
+over a conflicting maximum; an oversized specified or minimum width is not
+silently clamped to its container. Border-box dimensions are floored at padding
+plus borders, so the implied content size cannot become negative. Aspect-ratio
+height calculations use content-box or border-box dimensions according to
+`box-sizing`.
+
+Four regression tests cover these rules, including document-level placement of
+the text after a zero-sized border box with padding. These additions were
+verified through layout geometry tests; no new visual-parity score is claimed
+for them. Normative references: [CSS Sizing 3](https://www.w3.org/TR/css-sizing-3/)
+and [CSS Sizing 4](https://www.w3.org/TR/css-sizing-4/).

@@ -5431,25 +5431,7 @@ fn positioned_height(style: &ComputedStyle, containing_height: f32) -> f32 {
 }
 
 fn resolve_box_width(style: &ComputedStyle, available_width: f32) -> f32 {
-    let mut width = style
-        .width
-        .as_ref()
-        .map(|width| {
-            let specified = width.resolve(available_width);
-            if style.box_sizing == BoxSizing::ContentBox {
-                specified + horizontal_box_extras(style)
-            } else {
-                specified
-            }
-        })
-        .unwrap_or(available_width);
-    if let Some(min_width) = &style.min_width {
-        width = width.max(min_width.resolve(available_width));
-    }
-    if let Some(max_width) = &style.max_width {
-        width = width.min(max_width.resolve(available_width));
-    }
-    width.clamp(0.0, available_width)
+    resolve_flow_box_width(style, available_width, available_width)
 }
 
 fn resolved_text_align(style: &ComputedStyle) -> TextAlign {
@@ -5584,10 +5566,6 @@ fn resolve_flow_box_width(
     containing_width: f32,
     available_width: f32,
 ) -> f32 {
-    if style.width.is_none() {
-        return resolve_box_width(style, available_width);
-    }
-
     let mut width = style
         .width
         .as_ref()
@@ -5611,7 +5589,7 @@ fn resolve_flow_box_width(
     if let Some(min_width) = &style.min_width {
         width = width.max(min_width.resolve(containing_width) + extras);
     }
-    width.max(0.0)
+    width.max(horizontal_box_extras(style)).max(0.0)
 }
 
 fn resolve_box_height(
@@ -5620,11 +5598,12 @@ fn resolve_box_height(
     natural_height: f32,
     height_base: f32,
 ) -> f32 {
+    let vertical_extras = style.padding_top
+        + style.padding_bottom
+        + style.border_top_width.max(style.border_width)
+        + style.border_bottom_width.max(style.border_width);
     let extras = if style.box_sizing == BoxSizing::ContentBox {
-        style.padding_top
-            + style.padding_bottom
-            + style.border_top_width.max(style.border_width)
-            + style.border_bottom_width.max(style.border_width)
+        vertical_extras
     } else {
         0.0
     };
@@ -5636,14 +5615,19 @@ fn resolve_box_height(
     let mut resolved = if let Some(height) = &style.height {
         (height.resolve(height_base) + extras).max(min_height)
     } else if let Some(ratio) = style.aspect_ratio {
-        natural_height.max(box_width / ratio).max(min_height)
+        let ratio_height = if style.box_sizing == BoxSizing::ContentBox {
+            (box_width - horizontal_box_extras(style)).max(0.0) / ratio + vertical_extras
+        } else {
+            box_width / ratio
+        };
+        natural_height.max(ratio_height).max(min_height)
     } else {
         natural_height.max(min_height)
     };
     if let Some(max_height) = &style.max_height {
         resolved = resolved.min((max_height.resolve(height_base) + extras).max(min_height));
     }
-    resolved
+    resolved.max(vertical_extras).max(0.0)
 }
 
 fn horizontal_box_extras(style: &ComputedStyle) -> f32 {
@@ -10941,6 +10925,84 @@ fn rgb(hex: u32) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn border_box_dimensions_cannot_be_smaller_than_padding_and_borders() {
+        let mut style = ComputedStyle::default();
+        let pt = |points| crate::css::CssLength::Linear {
+            percent: 0.0,
+            points,
+        };
+        style.box_sizing = BoxSizing::BorderBox;
+        style.width = Some(pt(1.0));
+        style.height = Some(pt(1.0));
+        style.max_width = Some(pt(0.0));
+        style.max_height = Some(pt(0.0));
+        style.padding_left = 7.0;
+        style.padding_right = 9.0;
+        style.padding_top = 11.0;
+        style.padding_bottom = 13.0;
+        style.border_width = 2.0;
+        assert_eq!(resolve_box_width(&style, 100.0), 20.0);
+        assert_eq!(resolve_flow_box_width(&style, 100.0, 100.0), 20.0);
+        assert_eq!(resolve_box_height(&style, 20.0, 0.0, 100.0), 28.0);
+    }
+
+    #[test]
+    fn auto_width_minimum_wins_over_maximum_and_available_space() {
+        let mut style = ComputedStyle::default();
+        let pt = |points| crate::css::CssLength::Linear {
+            percent: 0.0,
+            points,
+        };
+        style.min_width = Some(pt(120.0));
+        style.max_width = Some(pt(80.0));
+        style.padding_left = 7.0;
+        style.padding_right = 9.0;
+        assert_eq!(resolve_box_width(&style, 100.0), 136.0);
+        assert_eq!(resolve_flow_box_width(&style, 100.0, 100.0), 136.0);
+        style.box_sizing = BoxSizing::BorderBox;
+        assert_eq!(resolve_box_width(&style, 100.0), 120.0);
+    }
+
+    #[test]
+    fn aspect_ratio_uses_the_box_selected_by_box_sizing() {
+        let mut style = ComputedStyle::default();
+        style.aspect_ratio = Some(2.0);
+        style.padding_left = 10.0;
+        style.padding_right = 10.0;
+        style.padding_top = 15.0;
+        style.padding_bottom = 15.0;
+        assert_eq!(resolve_box_height(&style, 120.0, 0.0, 300.0), 80.0);
+        style.box_sizing = BoxSizing::BorderBox;
+        assert_eq!(resolve_box_height(&style, 120.0, 0.0, 300.0), 60.0);
+    }
+
+    #[test]
+    fn zero_border_box_with_padding_reserves_height_in_document_flow() {
+        let document = crate::parser::parse_document("<body style='margin:0'><div style='box-sizing:border-box;width:0;height:0;padding:10pt;background:#0000ff'></div><div>after</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let rect = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Rect(rect) if rect.color.b == 1.0 && rect.color.r == 0.0 => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((rect.width, rect.height), (20.0, 20.0));
+        let after = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert!((after.y + after.font_size - rect.y).abs() < 0.01);
+    }
 
     #[test]
     fn inline_block_contains_floats_in_its_auto_height() {
