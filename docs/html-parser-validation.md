@@ -131,3 +131,18 @@ numeric errors and a 10,000-digit reference. DOM tests cover actual attributes
 and textarea RCDATA. This improves decoding only: font coverage, Unicode
 shaping, line breaking and the rest of HTML tree construction remain separate
 requirements; no new visual parity score is claimed.
+
+### Omitted list-item end tags
+
+HTML `li` start tags now close the preceding open list item where the
+special-element boundary permits it. `dt` and `dd` similarly close the previous
+description item. Three structural regressions cover siblings, intervening
+inline/div descendants, nested ordered/unordered lists and alternating
+description terms/definitions. Foreign namespaces stop the lookup, and this
+rule is not applied to foreign elements named `li`/`dt`/`dd`.
+
+This implements list-item closure, not the complete in-body insertion mode.
+Paragraph closure, formatting-element reconstruction, implied document
+elements, table insertion modes and malformed foreign-content recovery remain
+incomplete. These are DOM-structure tests, not list typography or visual parity
+measurements. Reference: [HTML tree construction](https://html.spec.whatwg.org/multipage/parsing.html#parsing-main-inbody).

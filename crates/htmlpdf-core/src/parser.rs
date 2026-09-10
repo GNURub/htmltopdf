@@ -144,7 +144,7 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         if tag.is_empty() {
             continue;
         }
-        let parent = *stack.last().unwrap_or(&document.root());
+        let mut parent = *stack.last().unwrap_or(&document.root());
         let namespace = child_namespace(
             namespaces
                 .get(&parent)
@@ -153,6 +153,10 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
             document.node(parent),
             &tag,
         );
+        if namespace == ParsingNamespace::Html && matches!(tag.as_str(), "li" | "dt" | "dd") {
+            close_previous_list_item(&document, &mut stack, &namespaces, &tag);
+            parent = *stack.last().unwrap_or(&document.root());
+        }
         let id = document.push_element(parent, tag.clone(), attrs);
         if namespace != ParsingNamespace::Html {
             namespaces.insert(id, namespace);
@@ -192,6 +196,117 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
 
 fn is_html_space(ch: char) -> bool {
     matches!(ch, '\t' | '\n' | '\u{000c}' | '\r' | ' ')
+}
+
+fn close_previous_list_item(
+    document: &Document,
+    stack: &mut Vec<crate::dom::NodeId>,
+    namespaces: &BTreeMap<crate::dom::NodeId, ParsingNamespace>,
+    incoming: &str,
+) {
+    for index in (1..stack.len()).rev() {
+        let id = stack[index];
+        if namespaces.contains_key(&id) {
+            break;
+        }
+        let Some(crate::dom::Node::Element(element)) = document.node(id) else {
+            continue;
+        };
+        let tag = element.tag.as_str();
+        if (incoming == "li" && tag == "li")
+            || (matches!(incoming, "dt" | "dd") && matches!(tag, "dt" | "dd"))
+        {
+            stack.truncate(index);
+            break;
+        }
+        // HTML's special-element barrier, except address/div/p, prevents a
+        // nested list or another scope from closing an outer list item.
+        if matches!(
+            tag,
+            "applet"
+                | "area"
+                | "article"
+                | "aside"
+                | "base"
+                | "basefont"
+                | "bgsound"
+                | "blockquote"
+                | "body"
+                | "br"
+                | "button"
+                | "caption"
+                | "center"
+                | "col"
+                | "colgroup"
+                | "dd"
+                | "details"
+                | "dir"
+                | "dl"
+                | "dt"
+                | "embed"
+                | "fieldset"
+                | "figcaption"
+                | "figure"
+                | "footer"
+                | "form"
+                | "frame"
+                | "frameset"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "head"
+                | "header"
+                | "hgroup"
+                | "hr"
+                | "html"
+                | "iframe"
+                | "img"
+                | "input"
+                | "keygen"
+                | "li"
+                | "link"
+                | "listing"
+                | "main"
+                | "marquee"
+                | "menu"
+                | "meta"
+                | "nav"
+                | "noembed"
+                | "noframes"
+                | "noscript"
+                | "object"
+                | "ol"
+                | "param"
+                | "plaintext"
+                | "pre"
+                | "script"
+                | "search"
+                | "section"
+                | "select"
+                | "source"
+                | "style"
+                | "summary"
+                | "table"
+                | "tbody"
+                | "td"
+                | "template"
+                | "textarea"
+                | "tfoot"
+                | "th"
+                | "thead"
+                | "title"
+                | "tr"
+                | "track"
+                | "ul"
+                | "wbr"
+                | "xmp"
+        ) {
+            break;
+        }
+    }
 }
 
 // Only a quote at the beginning of an attribute value opens a quoted
@@ -451,6 +566,40 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn omitted_list_item_end_tags_produce_siblings() {
+        let document = parse_document("<ul id='list'><li id='one'>One<div><span>detail<li id='two'>Two<li id='three'>Three</ul><p id='after'>after</p>").unwrap();
+        for id in ["#one", "#two", "#three"] {
+            assert_parent(&document, id, "#list");
+        }
+        assert_parent(&document, "span", "div");
+        assert_parent(&document, "div", "#one");
+        assert_eq!(
+            document.parent_of(document.query_selector("#after").unwrap()),
+            Some(document.root())
+        );
+    }
+
+    #[test]
+    fn nested_lists_do_not_close_outer_items() {
+        let document = parse_document("<ul id='outer'><li id='a'>A<ol id='inner'><li id='b'>B<li id='c'>C</ol><li id='d'>D</ul>").unwrap();
+        for id in ["#a", "#d"] {
+            assert_parent(&document, id, "#outer");
+        }
+        for id in ["#b", "#c"] {
+            assert_parent(&document, id, "#inner");
+        }
+        assert_parent(&document, "#inner", "#a");
+    }
+
+    #[test]
+    fn omitted_description_item_end_tags_produce_siblings() {
+        let document = parse_document("<dl id='list'><dt id='term'>Term<dd id='definition'>Definition<dd id='extra'>Extra<dt id='next'>Next</dl>").unwrap();
+        for id in ["#term", "#definition", "#extra", "#next"] {
+            assert_parent(&document, id, "#list");
+        }
     }
 
     #[test]
