@@ -104,3 +104,19 @@ measurement. Reference: [CSS line height calculations](https://www.w3.org/TR/CSS
 and arbitrary length/percentage vertical alignment still require work. The
 current parser aliases `text-top`/`text-bottom` to `top`/`bottom`; that is not a
 claim that those CSS values are equivalent.
+
+## Visual acceptance gate
+
+When `--threshold-rmse-normalized` is supplied, the browser comparator now
+requires every page from both PDFs to be compared, matching raster dimensions
+without reference resizing, and all compared pages within the error threshold.
+`--pages first` cannot approve a multipage document; neither can a restrictive
+`--max-pages` cap. A resized reference remains available for diagnostic images
+and metrics, but cannot produce an accepted gate result.
+
+Reports include `all_pages_compared`, `raster_dimensions_match`, and explicit
+`failure_reasons`. Eleven browser-independent tests exercise these gates,
+invalid page counts, and valid/invalid ImageMagick metric output. Running
+without a threshold remains diagnostic only. These stricter checks do not
+establish renderer conformance by themselves, and raster dimensions do not
+verify every PDF page-box property.

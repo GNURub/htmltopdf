@@ -8,12 +8,16 @@ This is intentionally an evidence tool, not a fake pass/fail proxy. It renders:
 4. ImageMagick RMSE diff image(s) and JSON metrics
 
 Use --threshold-rmse-normalized only when a fixture has an agreed acceptance
-budget; otherwise the script reports evidence and exits 0.
+budget. Passing this gate requires comparing every page of both documents,
+matching raster dimensions without resizing, and meeting the pixel-error
+threshold on every page. Use --pages all for multipage documents. Without a
+threshold the script reports evidence and exits 0, not a conformance verdict.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -55,10 +59,14 @@ def pdf_page_count(path: Path) -> int:
 
 def parse_rmse(stderr: str) -> tuple[float, float]:
     # ImageMagick emits e.g. "1234.56 (0.018837)" to stderr.
-    match = re.search(r"([0-9.]+)\s+\(([0-9.]+)\)", stderr)
+    number = r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    match = re.fullmatch(rf"\s*({number})\s+\(({number})\)\s*", stderr)
     if not match:
         raise ValueError(f"could not parse ImageMagick RMSE: {stderr!r}")
-    return float(match.group(1)), float(match.group(2))
+    absolute, normalized = float(match.group(1)), float(match.group(2))
+    if not math.isfinite(absolute) or not math.isfinite(normalized) or not 0 <= normalized <= 1:
+        raise ValueError(f"invalid ImageMagick RMSE: {stderr!r}")
+    return absolute, normalized
 
 
 def render_pdf_page(pdf: Path, page_number: int, output_png: Path, label: str) -> None:
@@ -172,6 +180,9 @@ def main() -> int:
     )
     htmlpdf_page_count = pdf_page_count(htmlpdf_pdf)
     browser_page_count = pdf_page_count(browser_pdf)
+    if htmlpdf_page_count < 1 or browser_page_count < 1:
+        sys.stderr.write("both PDFs must contain at least one page\n")
+        return 2
     pages_to_compare = 1 if args.pages == "first" else min(htmlpdf_page_count, browser_page_count)
     if args.max_pages is not None:
         pages_to_compare = min(pages_to_compare, args.max_pages)
@@ -204,6 +215,20 @@ def main() -> int:
     rmse_normalized = first_page["rmse_normalized"]
     max_rmse_page = max(page_metrics, key=lambda metric: metric["rmse_normalized"])
     mean_rmse_normalized = sum(metric["rmse_normalized"] for metric in page_metrics) / len(page_metrics)
+    all_pages_compared = pages_to_compare == htmlpdf_page_count == browser_page_count
+    raster_dimensions_match = all(
+        metric["htmlpdf_size"] == metric["browser_size"]
+        and not metric["browser_raster_was_resized_for_metric"]
+        for metric in page_metrics
+    )
+    failure_reasons = []
+    if not all_pages_compared:
+        failure_reasons.append("not_all_pages_compared")
+    if not raster_dimensions_match:
+        failure_reasons.append("raster_dimensions_mismatch")
+    if (args.threshold_rmse_normalized is not None
+            and max_rmse_page["rmse_normalized"] > args.threshold_rmse_normalized):
+        failure_reasons.append("pixel_error_exceeds_threshold")
 
     report = {
         "html": relpath(html),
@@ -226,11 +251,13 @@ def main() -> int:
         "max_rmse_normalized": max_rmse_page["rmse_normalized"],
         "max_rmse_page": max_rmse_page["page"],
         "page_metrics": page_metrics,
+        "all_pages_compared": all_pages_compared,
+        "raster_dimensions_match": raster_dimensions_match,
+        "failure_reasons": failure_reasons,
         "threshold_rmse_normalized": args.threshold_rmse_normalized,
         "passed_threshold": None
         if args.threshold_rmse_normalized is None
-        else htmlpdf_page_count == browser_page_count
-        and max_rmse_page["rmse_normalized"] <= args.threshold_rmse_normalized,
+        else not failure_reasons,
     }
     report_json.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     print(json.dumps(report, indent=2, ensure_ascii=False))
