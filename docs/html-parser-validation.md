@@ -91,3 +91,12 @@ breakout rules, implied elements/end tags, adoption-agency handling and
 namespace-aware DOM consumers remain incomplete. The checks establish tree
 relationships, not browser visual parity. Reference:
 [WHATWG HTML parsing](https://html.spec.whatwg.org/multipage/parsing.html).
+
+End-tag name recognition now treats a slash as a delimiter, so `</div/>` and
+end tags with ignored attributes close their matching element. Token trimming
+and end-tag name splitting use HTML whitespace rather than Unicode whitespace;
+NBSP, em space and vertical tab no longer close an unrelated plain tag name.
+Two structural tests cover slash/attribute variants, case folding, form feed,
+Unicode lookalikes and following-sibling parentage. This is not complete HTML
+tokenizer conformance: start-tag/attribute whitespace handling and malformed
+tree-construction recovery still require further work.

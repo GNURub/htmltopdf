@@ -109,7 +109,7 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
         let Some((close, self_closing)) = find_tag_end(html, open + 1) else {
             break;
         };
-        let token = html[open + 1..close].trim();
+        let token = html[open + 1..close].trim_matches(is_html_space);
         cursor = close + 1;
 
         if token.is_empty() || token.starts_with('!') || token.starts_with('?') {
@@ -118,7 +118,7 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
 
         if let Some(end_tag) = token.strip_prefix('/') {
             let end_tag = end_tag
-                .split_whitespace()
+                .split(|ch| is_html_space(ch) || ch == '/')
                 .next()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
@@ -183,6 +183,10 @@ pub fn parse_document(html: &str) -> Result<Document, RenderError> {
     }
 
     Ok(document)
+}
+
+fn is_html_space(ch: char) -> bool {
+    matches!(ch, '\t' | '\n' | '\u{000c}' | '\r' | ' ')
 }
 
 // Only a quote at the beginning of an attribute value opens a quoted
@@ -435,6 +439,41 @@ mod tests {
             document.query_selector(parent),
             "{child} should be inside {parent}"
         );
+    }
+
+    #[test]
+    fn end_tag_slash_and_attributes_close_the_matching_element() {
+        for end in [
+            "</div/>",
+            "</DIV/>",
+            "</div data-x='>'>",
+            "</div/data-x='>'>",
+            "</div\u{000c}>",
+        ] {
+            let document = parse_document(&format!(
+                "<main><div><span>inside</span>{end}<p>after</p></main>"
+            ))
+            .unwrap();
+            assert_parent(&document, "span", "div");
+            assert_parent(&document, "p", "main");
+        }
+    }
+
+    #[test]
+    fn unicode_spaces_and_name_prefixes_do_not_close_another_tag() {
+        for end in [
+            "</div-extra>",
+            "</div\u{00a0}>",
+            "</div\u{2003}>",
+            "</div\u{000b}>",
+        ] {
+            let document = parse_document(&format!(
+                "<main><div>{end}<span>inside</span></div><p>after</p></main>"
+            ))
+            .unwrap();
+            assert_parent(&document, "span", "div");
+            assert_parent(&document, "p", "main");
+        }
     }
 
     #[test]
