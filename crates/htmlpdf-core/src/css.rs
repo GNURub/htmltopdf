@@ -7179,11 +7179,27 @@ fn parse_border_radius_with_rem(
     length_context: impl Into<LengthContext> + Copy,
 ) -> Option<f32> {
     let length_context = length_context.into();
-    let first_radius_group = value.split('/').next()?.trim();
-    split_css_whitespace(first_radius_group)
-        .into_iter()
-        .filter_map(|part| parse_pt_or_px_with_rem(&part, length_context))
-        .next()
+    let groups = split_top_level(value, &['/']);
+    if !matches!(groups.len(), 1 | 2) {
+        return None;
+    }
+    let mut first = None;
+    for group in groups {
+        let parts = split_css_whitespace(group);
+        if !(1..=4).contains(&parts.len()) {
+            return None;
+        }
+        for part in parts {
+            let radius = parse_pt_or_px_with_rem(&part, length_context)?;
+            if !radius.is_finite() || radius < 0.0 {
+                return None;
+            }
+            first.get_or_insert(radius);
+        }
+    }
+    // The current style representation stores one circular radius. Validate
+    // all components even though independent/elliptical corners remain TODO.
+    first
 }
 
 fn parse_border_line_style(value: &str) -> Option<BorderLineStyle> {
@@ -10876,6 +10892,32 @@ mod tests {
         assert_eq!(none_style.list_style_type, ListStyleType::None);
         assert_eq!(steps_style.list_style_type, ListStyleType::Decimal);
         assert_eq!(decimal_style.list_style_type, ListStyleType::Decimal);
+    }
+
+    #[test]
+    fn border_radius_reset_and_invalid_lists_preserve_cascade() {
+        for (value, expected) in [
+            ("0", 0.0),
+            ("2pt", 2.0),
+            ("invalid 4pt", 8.0),
+            ("4pt invalid", 8.0),
+            ("4pt / invalid", 8.0),
+            ("4pt / 2pt / 3pt", 8.0),
+            ("4pt 2pt 3pt 1pt 5pt", 8.0),
+            ("-2pt", 8.0),
+            ("NaNpt", 8.0),
+        ] {
+            let document = parse_document("<div class='target'>box</div>").unwrap();
+            let stylesheet = Stylesheet::from_css_chunks(vec![format!(
+                ".target {{border-radius:8pt;border-radius:{value}}}"
+            )]);
+            let style = ComputedStyle::for_node(
+                &document,
+                &stylesheet,
+                document.query_selector(".target").unwrap(),
+            );
+            assert_eq!(style.border_radius, expected, "{value}");
+        }
     }
 
     #[test]

@@ -247,3 +247,12 @@ offset with an 8pt border and verifies both a 12pt radius and an oversized
 100pt radius on a 100 x 50pt box. This is coordinate validation, not a new
 visual score. Unequal rounded borders and cases where border thickness exceeds
 the corner radius still require separate inner/outer contour handling.
+
+Radius parsing now validates every supplied length and both slash-separated
+groups before changing the style. Invalid components, negative/non-finite
+lengths, extra slash groups and overlong lists no longer partially override an
+earlier radius. A failing regression reproduced `invalid 4pt` overriding 8pt;
+the test now also checks valid smaller-radius and zero resets. The style still
+stores one scalar radius, so independent corners, elliptical radii and
+percentages remain incomplete; this validation change does not add their
+rendering support or claim a new visual score.
