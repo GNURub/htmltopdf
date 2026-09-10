@@ -150,3 +150,14 @@ layout-coordinate checks, not a new raster parity score. Independent flex,
 grid, table and control layout paths, border-side zero overrides, positioned
 containing-block edges and fragmented border decoration still need validation
 and corrections; this change does not establish complete box-model parity.
+
+Follow-up: per-side width longhands now control ordinary container sizing,
+content insets, background geometry and border painting without taking the
+maximum with the earlier shorthand. A regression first reproduced an explicitly
+zero left border being restored to 4pt. It now checks zero top/left edges,
+smaller right/bottom strokes, content coordinates and following-block height.
+The existing box-size floor test now constructs all four computed longhands,
+as the CSS shorthand parser does, while retaining its numeric assertions.
+Per-side border styles and shorthand resets, synthetic table borders and native
+control defaults remain separate incomplete paths. No visual parity score is
+claimed for this correction.

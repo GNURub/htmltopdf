@@ -2096,9 +2096,9 @@ impl<'a> LayoutContext<'a> {
                     + style.padding_right
                     + style.margin_left
                     + style.margin_right
-                    + style.border_left_width.max(style.border_width)
-                    + style.border_right_width.max(style.border_width))
-                .min(available_width)
+                    + style.border_left_width
+                    + style.border_right_width)
+                    .min(available_width)
             }
             _ => 0.0,
         }
@@ -3266,7 +3266,7 @@ impl<'a> LayoutContext<'a> {
                         if let Some(line) = lines.get_mut(first_line) {
                             line.before += child_style.margin_top
                                 + child_style.padding_top
-                                + child_style.border_top_width.max(child_style.border_width);
+                                + child_style.border_top_width;
                         }
                         if let Some(line) = lines.last_mut() {
                             line.after += child_style.margin_bottom
@@ -3847,10 +3847,10 @@ impl<'a> LayoutContext<'a> {
             self.current_y -= style.margin_top;
         }
 
-        let border_top = style.border_top_width.max(style.border_width);
-        let border_bottom = style.border_bottom_width.max(style.border_width);
-        let border_left = style.border_left_width.max(style.border_width);
-        let border_right = style.border_right_width.max(style.border_width);
+        let border_top = style.border_top_width;
+        let border_bottom = style.border_bottom_width;
+        let border_left = style.border_left_width;
+        let border_right = style.border_right_width;
         self.ensure_space(first_fragment_min_height(style) + border_top + border_bottom);
 
         let page_index = self.pages.len().saturating_sub(1);
@@ -5176,10 +5176,10 @@ impl<'a> LayoutContext<'a> {
         height: f32,
         style: &ComputedStyle,
     ) {
-        let top_width = style.border_top_width.max(style.border_width);
-        let right_width = style.border_right_width.max(style.border_width);
-        let bottom_width = style.border_bottom_width.max(style.border_width);
-        let left_width = style.border_left_width.max(style.border_width);
+        let top_width = style.border_top_width;
+        let right_width = style.border_right_width;
+        let bottom_width = style.border_bottom_width;
+        let left_width = style.border_left_width;
         let top_color = style
             .border_top_color
             .or(style.border_color)
@@ -5322,8 +5322,7 @@ impl<'a> LayoutContext<'a> {
 }
 
 fn has_border(style: &ComputedStyle) -> bool {
-    style.border_width > 0.0
-        || style.border_top_width > 0.0
+    style.border_top_width > 0.0
         || style.border_right_width > 0.0
         || style.border_bottom_width > 0.0
         || style.border_left_width > 0.0
@@ -5716,8 +5715,8 @@ fn resolve_box_height(
 ) -> f32 {
     let vertical_extras = style.padding_top
         + style.padding_bottom
-        + style.border_top_width.max(style.border_width)
-        + style.border_bottom_width.max(style.border_width);
+        + style.border_top_width
+        + style.border_bottom_width;
     let extras = if style.box_sizing == BoxSizing::ContentBox {
         vertical_extras
     } else {
@@ -5747,10 +5746,7 @@ fn resolve_box_height(
 }
 
 fn horizontal_box_extras(style: &ComputedStyle) -> f32 {
-    style.padding_left
-        + style.padding_right
-        + style.border_left_width.max(style.border_width)
-        + style.border_right_width.max(style.border_width)
+    style.padding_left + style.padding_right + style.border_left_width + style.border_right_width
 }
 
 #[derive(Debug)]
@@ -7338,10 +7334,10 @@ fn background_clip_rect(
 
 fn border_insets(style: &ComputedStyle) -> (f32, f32, f32, f32) {
     (
-        style.border_left_width.max(style.border_width),
-        style.border_right_width.max(style.border_width),
-        style.border_top_width.max(style.border_width),
-        style.border_bottom_width.max(style.border_width),
+        style.border_left_width,
+        style.border_right_width,
+        style.border_top_width,
+        style.border_bottom_width,
     )
 }
 
@@ -11219,6 +11215,50 @@ mod tests {
     }
 
     #[test]
+    fn side_width_overrides_do_not_restore_the_border_shorthand_width() {
+        let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:4pt solid black;border-left-width:0;border-right-width:1pt;border-top-width:0;border-bottom-width:2pt'>inside</div><div>after</div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let inside = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "inside" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(inside.x, options.page.margin_left_pt + 3.0);
+        assert_eq!(
+            inside.y,
+            options.page.height_pt - options.page.margin_top_pt - 13.0
+        );
+        let borders: Vec<_> = pages[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                LayoutItem::Line(line) => Some(line.width),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(borders.len(), 2);
+        assert!(borders.contains(&1.0));
+        assert!(borders.contains(&2.0));
+        let after = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::Text(run) if run.text == "after" => Some(run),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            after.y,
+            options.page.height_pt - options.page.margin_top_pt - 30.0
+        );
+    }
+
+    #[test]
     fn container_border_insets_content_and_contributes_to_auto_height() {
         for content in ["inside", "<span>inside</span>", "<div>inside</div>"] {
             let html = format!("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:2pt solid black'>{content}</div><div>after</div></body>");
@@ -11569,6 +11609,11 @@ mod tests {
         style.padding_top = 11.0;
         style.padding_bottom = 13.0;
         style.border_width = 2.0;
+        // Computed border shorthands populate all four longhands.
+        style.border_top_width = 2.0;
+        style.border_right_width = 2.0;
+        style.border_bottom_width = 2.0;
+        style.border_left_width = 2.0;
         assert_eq!(resolve_box_width(&style, 100.0), 20.0);
         assert_eq!(resolve_flow_box_width(&style, 100.0, 100.0), 20.0);
         assert_eq!(resolve_box_height(&style, 20.0, 0.0, 100.0), 28.0);
