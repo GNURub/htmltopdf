@@ -5228,6 +5228,81 @@ impl<'a> LayoutContext<'a> {
 
         let top = y + height;
         let right = x + width;
+        if style.border_style == BorderLineStyle::Solid && style.border_radius == 0.0 {
+            if rounded_border_can_use_single_stroke(
+                top_width,
+                right_width,
+                bottom_width,
+                left_width,
+                top_color,
+                right_color,
+                bottom_color,
+                left_color,
+            ) {
+                self.push(LayoutItem::StrokeRect(StrokeRect {
+                    x: x + top_width / 2.0,
+                    y: y + top_width / 2.0,
+                    width: (width - top_width).max(0.0),
+                    height: (height - top_width).max(0.0),
+                    stroke_width: top_width,
+                    radius: 0.0,
+                    color: top_color,
+                    dash: None,
+                }));
+                return;
+            }
+            let inner_left = x + left_width;
+            let inner_right = right - right_width;
+            let inner_top = top - top_width;
+            let inner_bottom = y + bottom_width;
+            for (side_width, color, points) in [
+                (
+                    top_width,
+                    top_color,
+                    vec![
+                        (x, top),
+                        (right, top),
+                        (inner_right, inner_top),
+                        (inner_left, inner_top),
+                    ],
+                ),
+                (
+                    right_width,
+                    right_color,
+                    vec![
+                        (right, top),
+                        (right, y),
+                        (inner_right, inner_bottom),
+                        (inner_right, inner_top),
+                    ],
+                ),
+                (
+                    bottom_width,
+                    bottom_color,
+                    vec![
+                        (right, y),
+                        (x, y),
+                        (inner_left, inner_bottom),
+                        (inner_right, inner_bottom),
+                    ],
+                ),
+                (
+                    left_width,
+                    left_color,
+                    vec![
+                        (x, y),
+                        (x, top),
+                        (inner_left, inner_top),
+                        (inner_left, inner_bottom),
+                    ],
+                ),
+            ] {
+                if side_width > 0.0 {
+                    self.push(LayoutItem::Polygon(Polygon { points, color }));
+                }
+            }
+            return;
+        }
         if top_width > 0.0 {
             self.push(LayoutItem::Line(Line {
                 x1: x,
@@ -11215,6 +11290,31 @@ mod tests {
     }
 
     #[test]
+    fn solid_border_strokes_stay_inside_the_border_box() {
+        let document = crate::parser::parse_document("<body style='margin:0'><div style='box-sizing:border-box;width:100pt;height:50pt;border:8pt solid red'></div></body>").unwrap();
+        let stylesheet = Stylesheet::from_document(&document);
+        let options = RenderOptions::default();
+        let pages = layout_document(&document, &stylesheet, &options);
+        let stroke = pages[0]
+            .items
+            .iter()
+            .find_map(|item| match item {
+                LayoutItem::StrokeRect(rect) => Some(rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(stroke.x, options.page.margin_left_pt + 4.0);
+        assert_eq!(
+            stroke.y,
+            options.page.height_pt - options.page.margin_top_pt - 46.0
+        );
+        assert_eq!(
+            (stroke.width, stroke.height, stroke.stroke_width),
+            (92.0, 42.0, 8.0)
+        );
+    }
+
+    #[test]
     fn side_width_overrides_do_not_restore_the_border_shorthand_width() {
         let document = crate::parser::parse_document("<body style='margin:0;font-size:10pt;line-height:12pt'><div style='width:100pt;padding:3pt;border:4pt solid black;border-left-width:0;border-right-width:1pt;border-top-width:0;border-bottom-width:2pt'>inside</div><div>after</div></body>").unwrap();
         let stylesheet = Stylesheet::from_document(&document);
@@ -11237,7 +11337,29 @@ mod tests {
             .items
             .iter()
             .filter_map(|item| match item {
-                LayoutItem::Line(line) => Some(line.width),
+                LayoutItem::Polygon(polygon) => {
+                    let min_x = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.0)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_x = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.0)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    let min_y = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.1)
+                        .fold(f32::INFINITY, f32::min);
+                    let max_y = polygon
+                        .points
+                        .iter()
+                        .map(|p| p.1)
+                        .fold(f32::NEG_INFINITY, f32::max);
+                    Some((max_x - min_x).min(max_y - min_y))
+                }
                 _ => None,
             })
             .collect();

@@ -221,3 +221,21 @@ clamping are tested. Numbers exceeding f32 capacity are currently rejected,
 rather than implementing full CSS numeric range handling. Other color models
 may still substitute their alpha default when their shared parser rejects a
 value; their complete grammar and fallback behavior remain to be corrected.
+
+## Solid border raster comparison
+
+`examples/generic-border-box-geometry.html` isolates uniform and unequal solid
+borders without fonts. Visual review exposed strokes extending outside their
+border boxes and overlapping corner colors. Non-rounded solid borders now use
+an inset single stroke for uniform sides or four joined side polygons for
+unequal widths/colors. A coordinate test checks the inset stroke, while the
+side-width regression now measures polygon thicknesses instead of line widths.
+
+Full-page comparison against the installed Chromium headless shell produced
+one 500 x 375 raster from each PDF without resizing. Normalized RMSE fell from
+0.207669 to 0.0527316. Both final rasters were inspected; remaining differences
+include subpixel edge placement/rasterization. No acceptance threshold was
+asserted. Rounded borders, dashed/dotted corners, extreme overlapping border
+widths and fragmented decorations are not validated by this fixture. The
+existing inline-block fixture was also rechecked at 0.0666196 before this
+border-paint change; it is not a post-change suite-wide parity result.
